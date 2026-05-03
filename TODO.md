@@ -3,13 +3,15 @@
 ## Implementation Plan
 
 ### Phase 1 — Smoke test the model stack
-- [ ] Run `scripts/smoke_test_nemotron.py` — verify tokenizer load, model load, generation, and adapter save
-- [ ] Confirm saved adapter directory contains `adapter_config.json`
+- [x] Run `scripts/smoke_test_nemotron.py` — verify tokenizer load, model load, generation, and adapter save
+- [x] Confirm saved adapter directory contains `adapter_config.json`
+- [ ] Evaluate NVIDIA PyTorch container migration `25.12-py3` → `26.01-py3` per `plans/pytorch-container-migration-plan.md`
 
 ### Phase 2 — Adapt the fine-tuning objective
 - [ ] Populate `data/train.jsonl` with reasoning tasks ending in `Final answer: \boxed{...}` (currently 3 toy examples)
 - [ ] Verify prompt templates enforce `Final answer: \boxed{...}` as the final assistant line
 - [ ] Verify `scripts/validate_metric.py` parses boxed answers and applies Kaggle-style correctness comparison
+- [ ] Audit `max_new_tokens` budget — smoke test shows model gets cut off mid-answer at 64 tokens; competition outputs must reach `Final answer: \boxed{...}` before the limit; set a budget that covers full reasoning chain + closing line
 
 ### Phase 3 — Keep DSPy offline
 - [ ] Build DSPy offline pipeline to generate synthetic reasoning traces
@@ -37,7 +39,7 @@
 - [x] Add `scripts/package_submission.sh`
 - [x] Create `configs/` directory or remove `COPY configs` from `Dockerfile.gb10` — directory missing, image build will fail
 - [x] Build image — `nemotron-gb10:latest` builds successfully
-- [ ] Run smoke test inside container to confirm stack is functional end-to-end
+- [x] Run smoke test inside container to confirm stack is functional end-to-end
 
 ## Submission Checklist
 

@@ -3,7 +3,7 @@
 # NVIDIA notes Blackwell optimization from 25.01 onward, and Nemotron 3 Nano
 # HF examples are tested with Transformers 4.57.3.
 
-FROM nvcr.io/nvidia/pytorch:25.12-py3
+FROM --platform=linux/arm64 nvcr.io/nvidia/pytorch:25.12-py3
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -32,8 +32,9 @@ RUN pip install \
     "datasets==3.2.0" \
     "accelerate==1.3.0" \
     "peft==0.14.0" \
-    "trl<0.16.0" \
+    "trl==0.15.2" \
     "torchao==0.16.0" \
+    "huggingface_hub==0.36.2" \
     "sentencepiece" \
     "safetensors" \
     "scipy" \
@@ -43,13 +44,66 @@ RUN pip install \
     "pandas" \
     "tqdm" \
     "jsonschema" \
-    "huggingface_hub" \
     "dspy-ai>=2.4.0" \
     "fastapi" \
     "uvicorn[standard]" \
     "pyyaml" \
     "gradio" \
     "neo4j"
+
+# causal-conv1d: build from patched source because:
+#   - 1.6.x references TensorImpl::decref_pyobject() absent from NVIDIA's nv25.12 torch ABI
+#   - 1.5.x setup.py hardcodes old arches (sm_53/62/70/72) dropped by CUDA 13.0
+# Fix: clone 1.5.0.post8, patch setup.py to sm_80/sm_90/sm_120, then build.
+#
+# mamba-ssm: selective_scan_cuda.so ships as x86_64 in the base image's dist-packages.
+# Python silently ignores it on aarch64 (platform tag mismatch). The source build
+# silently skips compiling the extension. Patch selective_scan_interface.py with
+# try/except so the package imports cleanly; Mamba-2 ops use Triton and never call
+# the legacy CUDA path.
+#
+# Pass --build-arg MAMBA_REBUILD=$(date +%s) to force recompile on arch change.
+ARG MAMBA_REBUILD=1
+RUN cd /tmp \
+ && git clone --depth 1 --branch v1.5.0.post8 \
+      https://github.com/Dao-AILab/causal-conv1d.git cc1d_src \
+ && python3 -c "
+with open('/tmp/cc1d_src/setup.py') as f:
+    lines = f.readlines()
+new_lines = (
+    lines[:172] +
+    [
+        '        cc_flag.append(\"-gencode\")\n',
+        '        cc_flag.append(\"arch=compute_80,code=sm_80\")\n',
+        '        cc_flag.append(\"-gencode\")\n',
+        '        cc_flag.append(\"arch=compute_90,code=sm_90\")\n',
+        '        if bare_metal_version >= Version(\"12.0\"):\n',
+        '            cc_flag.append(\"-gencode\")\n',
+        '            cc_flag.append(\"arch=compute_120,code=sm_120\")\n',
+    ] +
+    lines[187:]
+)
+with open('/tmp/cc1d_src/setup.py', 'w') as f:
+    f.writelines(new_lines)
+" \
+ && CAUSAL_CONV1D_FORCE_BUILD=TRUE CUDA_HOME=/usr/local/cuda \
+    pip install /tmp/cc1d_src --no-deps --no-build-isolation \
+ && rm -rf /tmp/cc1d_src
+
+RUN TORCH_CUDA_ARCH_LIST="8.0;8.6;8.7;8.9;9.0;12.0;12.1+PTX" \
+    CUDA_HOME=/usr/local/cuda \
+    pip install mamba-ssm --no-binary mamba-ssm --no-build-isolation \
+ && python3 -c "
+f = '/usr/local/lib/python3.12/dist-packages/mamba_ssm/ops/selective_scan_interface.py'
+with open(f) as fh:
+    c = fh.read()
+with open(f, 'w') as fh:
+    fh.write(c.replace(
+        'import selective_scan_cuda',
+        'try:\n    import selective_scan_cuda\nexcept ImportError:\n    selective_scan_cuda = None',
+        1
+    ))
+"
 
 RUN pip install scikit-build-core
 RUN git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git /workspace/bitsandbytes \

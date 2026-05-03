@@ -1,0 +1,13 @@
+base_model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
+train_file: data/train.jsonl
+valid_file: data/valid.jsonl
+output_dir: output/adapter
+lora_r: 32
+lora_alpha: 64
+lora_dropout: 0.05
+max_seq_length: 2048
+batch_size: 1
+grad_accum: 8
+learning_rate: 2e-4
+num_epochs: 1
+use_4bit: false  # GB10 has 128GB unified memory — bf16 fits; set true only if OOM

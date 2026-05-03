@@ -69,7 +69,7 @@ def main():
             bnb_4bit_compute_dtype=torch.bfloat16,
         )
     else:
-        model_kwargs["torch_dtype"] = torch.bfloat16
+        model_kwargs["dtype"] = torch.bfloat16
 
     model = AutoModelForCausalLM.from_pretrained(args.model_id, **model_kwargs)
     model.config.use_cache = False

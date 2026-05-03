@@ -23,6 +23,19 @@ This file maps the inline `[cite:N]` references used across the generated Markdo
 - `[cite:121]` NVIDIA Nemotron - SFTTrainer training - Kaggle — <https://www.kaggle.com/code/dennisfong/nvidia-nemotron-sfttrainer-training>[cite:121]
 - `[cite:123]` Models - Hugging Face PEFT package reference — <https://huggingface.co/docs/peft/package_reference/peft_model>[cite:123]
 - `[cite:125]` Nemotron SFT (Reasoning Trajectories Dataset) - Kaggle — <https://www.kaggle.com/code/kienngx/nemotron-sft-reasoning-trajectories-dataset>[cite:125]
+- `[cite:126]` PyTorch Release 26.01 – NVIDIA Docs — <https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-26-01.html>[cite:126]
+- `[cite:127]` PyTorch container (26.01-py3) – NVIDIA NGC Catalog — <https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch?version=26.01-py3>[cite:127]
+- `[cite:128]` PyG Release 26.01 – NVIDIA Docs — <https://docs.nvidia.com/deeplearning/frameworks/pyg-release-notes/rel-26-01.html>[cite:128]
+- `[cite:129]` NVIDIA CUDA 13.1 Powers Next-Gen GPU Programming with CUDA Tile and Performance Gains — <https://developer.nvidia.com/blog/nvidia-cuda-13-1-powers-next-gen-gpu-programming-with-nvidia-cuda-tile-and-performance-gains/>[cite:129]
+- `[cite:130]` CUDA Toolkit 13.1 – Release Notes — NVIDIA Documentation Hub — <https://docs.nvidia.com/cuda/archive/13.1.0/cuda-toolkit-release-notes/index.html>[cite:130]
+- `[cite:131]` PyTorch Release Notes Index – NVIDIA Docs — <https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/index.html>[cite:131]
+- `[cite:132]` Running PyTorch in NVIDIA Containers – NVIDIA Docs — <https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/running.html>[cite:132]
+- `[cite:133]` nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 – Hugging Face — <https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16>[cite:133]
+- `[cite:134]` causal-conv1d – Causal depthwise conv1d in CUDA, with a PyTorch interface — <https://github.com/Dao-AILab/causal-conv1d>[cite:134]
+- `[cite:135]` causal-conv1d – PyPI — <https://pypi.org/project/causal-conv1d/>[cite:135]
+- `[cite:136]` Transformers – PyPI — <https://pypi.org/project/transformers/>[cite:136]
+- `[cite:137]` Transformers Releases – Hugging Face GitHub — <https://github.com/huggingface/transformers/releases>[cite:137]
+- `[cite:138]` Transformers 4.57.3 needs older huggingface-hub – GitHub issue #42670 — <https://github.com/huggingface/transformers/issues/42670>[cite:138]
 
 ## Usage note
 

@@ -1,14 +1,9 @@
-# Nemotron LoRA training image — NVIDIA PyTorch 26.01 rebase for GB10 / DGX Spark.
-# See plans/pytorch-container-migration-plan.md for migration rationale.
-#
-# Key differences from Dockerfile.gb10 (25.12 base):
-#   - CUDA 13.1 (was 13.0)
-#   - PyTorch nv26.01 build — TensorImpl::decref_pyobject() now present (confirmed ×2)
-#   - causal-conv1d: clean 1.6.x source build; no ABI fallback to 1.5.0.post8 needed
-#   - Active /etc/pip/constraint.txt has only nvidia-internal entries — no conflicts
-#   - All Python package pins identical to Dockerfile.gb10 (Phase 1: isolate base change)
+# Nemotron LoRA training image for NVIDIA GB10 / DGX Spark style systems.
+# Base image: NVIDIA optimized PyTorch container with Blackwell support.
+# NVIDIA notes Blackwell optimization from 25.01 onward, and Nemotron 3 Nano
+# HF examples are tested with Transformers 4.57.3.
 
-FROM --platform=linux/arm64 nvcr.io/nvidia/pytorch:26.01-py3
+FROM --platform=linux/arm64 nvcr.io/nvidia/pytorch:25.12-py3
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -55,30 +50,44 @@ RUN pip install \
     "gradio" \
     "neo4j"
 
-# causal-conv1d: 1.6.x builds cleanly on 26.01 — TensorImpl::decref_pyobject() is present
-# in the nv26.01 libtorch ABI (was missing on 25.12, requiring the patched 1.5.0.post8 in
-# Dockerfile.gb10-25). TORCH_CUDA_ARCH_LIST targets only arches CUDA 13.1 supports (≥ 7.0).
+# causal-conv1d: build from patched source because:
+#   - 1.6.x references TensorImpl::decref_pyobject() absent from NVIDIA's nv25.12 torch ABI
+#   - 1.5.x setup.py hardcodes old arches (sm_53/62/70/72) dropped by CUDA 13.0
+# Fix: clone 1.5.0.post8, patch setup.py to sm_80/sm_90/sm_120, then build.
 #
-# mamba-ssm / selective_scan_cuda: Docker RUN steps run in OCI worker containers with
-# isolated device namespaces — GPU devices from the host are never visible, so
-# torch.cuda.is_available() is False and mamba-ssm's setup.py silently skips building
-# selective_scan_cuda. The extension is absent from the installed package, which causes
-# `import selective_scan_cuda` in selective_scan_interface.py to raise ModuleNotFoundError
-# at runtime.
-#
-# Fix: the && python3 -c "..." line below patches selective_scan_interface.py to wrap that
-# import in try/except, tolerating selective_scan_cuda = None. This is safe: Nemotron-H
-# uses Mamba-2 Triton kernels for its forward pass and never calls the legacy Mamba-1
-# selective_scan_cuda path. The patch matches only a bare top-level import so it is a
-# no-op if mamba-ssm already wraps it (as ≥ 2.3.1 does), preventing double-wrapping.
+# mamba-ssm: selective_scan_cuda.so ships as x86_64 in the base image's dist-packages.
+# Python silently ignores it on aarch64 (platform tag mismatch). The source build
+# silently skips compiling the extension. Patch selective_scan_interface.py with
+# try/except so the package imports cleanly; Mamba-2 ops use Triton and never call
+# the legacy CUDA path.
 #
 # Pass --build-arg MAMBA_REBUILD=$(date +%s) to force recompile on arch change.
 ARG MAMBA_REBUILD=1
-RUN CAUSAL_CONV1D_FORCE_BUILD=TRUE \
-    TORCH_CUDA_ARCH_LIST="8.0;8.6;8.7;8.9;9.0;12.0;12.1+PTX" \
-    CUDA_HOME=/usr/local/cuda \
-    MAX_JOBS=8 \
-    pip install causal-conv1d --no-binary causal-conv1d --no-build-isolation
+RUN cd /tmp \
+ && git clone --depth 1 --branch v1.5.0.post8 \
+      https://github.com/Dao-AILab/causal-conv1d.git cc1d_src \
+ && python3 -c "
+with open('/tmp/cc1d_src/setup.py') as f:
+    lines = f.readlines()
+new_lines = (
+    lines[:172] +
+    [
+        '        cc_flag.append(\"-gencode\")\n',
+        '        cc_flag.append(\"arch=compute_80,code=sm_80\")\n',
+        '        cc_flag.append(\"-gencode\")\n',
+        '        cc_flag.append(\"arch=compute_90,code=sm_90\")\n',
+        '        if bare_metal_version >= Version(\"12.0\"):\n',
+        '            cc_flag.append(\"-gencode\")\n',
+        '            cc_flag.append(\"arch=compute_120,code=sm_120\")\n',
+    ] +
+    lines[187:]
+)
+with open('/tmp/cc1d_src/setup.py', 'w') as f:
+    f.writelines(new_lines)
+" \
+ && CAUSAL_CONV1D_FORCE_BUILD=TRUE CUDA_HOME=/usr/local/cuda \
+    pip install /tmp/cc1d_src --no-deps --no-build-isolation \
+ && rm -rf /tmp/cc1d_src
 
 RUN TORCH_CUDA_ARCH_LIST="8.0;8.6;8.7;8.9;9.0;12.0;12.1+PTX" \
     CUDA_HOME=/usr/local/cuda \

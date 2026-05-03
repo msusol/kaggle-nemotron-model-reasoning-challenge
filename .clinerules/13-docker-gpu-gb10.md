@@ -36,9 +36,15 @@ Python silently ignores them, causing `ModuleNotFoundError` at import time.
 Python's module finder ignores it on aarch64 (platform tag mismatch). Building mamba_ssm from
 source with `--no-binary` also silently skips the extension.
 
-**Fix**: patch `mamba_ssm/ops/selective_scan_interface.py` — wrap `import selective_scan_cuda`
-in `try/except ImportError: selective_scan_cuda = None`. Nemotron-H uses Mamba-2 (Triton ops)
-and never calls the legacy CUDA path.
+**Fix**: patch `mamba_ssm/ops/selective_scan_interface.py` — wrap
+`import selective_scan_cuda` in `try/except ImportError: selective_scan_cuda = None`.
+The patch is **active in both Dockerfiles**. GPU access in Docker `RUN` steps is not achievable
+on this system: Docker OCI workers have isolated device namespaces that don't inherit GPU
+devices from the host even with `--privileged` on the outer container. Approaches tried and
+confirmed non-working: `--gpus all` (fails), privileged `moby/buildkit` daemon +
+`[worker.oci] privileged=true` (GPU still not in OCI workers), `--driver-opt privileged=true`
+on `docker-container` buildx driver (invalid option). The patch is safe: Nemotron-H uses
+Mamba-2 Triton kernels exclusively and never calls `selective_scan_cuda`.
 
 ### causal_conv1d 1.6.x — ABI gap (`decref_pyobject` missing)
 
@@ -57,5 +63,13 @@ architecture 'compute_53'`.
 **Fix**: clone from GitHub, patch `setup.py` lines 172–187 to replace the arch block with
 `sm_80/sm_90/sm_120`, build with `CAUSAL_CONV1D_FORCE_BUILD=TRUE`.
 
-Both patches are embedded in `Dockerfile.gb10` under the `MAMBA_REBUILD` ARG layer. Pass
+The causal_conv1d 1.5.x patch is in `Dockerfile.gb10-25` (25.12 archive). `Dockerfile.gb10`
+(26.01 primary) uses causal_conv1d 1.6.x directly — `decref_pyobject` is present in the
+nv26.01 torch ABI. The mamba_ssm try/except patch is **active in both** Dockerfiles. Pass
 `--build-arg MAMBA_REBUILD=$(date +%s)` to force recompile after a cached foreign-arch layer.
+
+### OOM during build — MAX_JOBS and cmake parallelism
+
+CUDA compilation can OOM when too many jobs run in parallel. Both Dockerfiles now set
+`MAX_JOBS=8` for causal-conv1d and mamba-ssm source builds, and use `-j8` for the
+bitsandbytes cmake step (instead of `-j$(nproc)` which spawns 72 jobs on Grace CPU).

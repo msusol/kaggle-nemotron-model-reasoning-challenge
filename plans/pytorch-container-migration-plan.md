@@ -1,5 +1,12 @@
 # PyTorch Container Migration Plan for Nemotron LoRA on GB10 / DGX Spark
 
+## Status
+
+| Migration | Status | Notes |
+|---|---|---|
+| `25.12-py3` → `26.01-py3` | ✅ Complete | causal-conv1d 1.6.x builds cleanly; mamba-ssm patched; smoke test passing |
+| `26.01-py3` → `26.04-py3` | 🔲 Planned | CUDA 13.2.1, PyTorch 2.12; revalidation required (see Phase 1b below) |
+
 ## Overview
 
 This plan migrates the training image from `nvcr.io/nvidia/pytorch:25.12-py3` to a newer NVIDIA PyTorch container while preserving Hugging Face Nemotron 3 Nano compatibility, ARM64 support, and the current custom extension strategy for `causal-conv1d`, `mamba-ssm`, and `bitsandbytes`.[cite:126][cite:127]
@@ -30,11 +37,22 @@ NVIDIA also documents that the PyTorch containers ship with `/etc/pip/constraint
 
 ## Phased plan
 
-### Phase 1: Rebase only
+### Phase 1a: Rebase to 26.01 ✅ COMPLETE
 
-1. Change the base image to `FROM --platform=linux/arm64 nvcr.io/nvidia/pytorch:26.01-py3`.[cite:127]
-2. Keep all Python package pins unchanged for the first build so the rebase isolates container-level changes from Python dependency changes.[cite:133][cite:126]
-3. Record the container-reported versions of Python, CUDA, torch, and architecture metadata during build validation.[cite:126][cite:129]
+1. Changed the base image to `FROM --platform=linux/arm64 nvcr.io/nvidia/pytorch:26.01-py3`.[cite:127]
+2. Kept all Python package pins unchanged — isolated container-level changes from Python dependency changes.[cite:133][cite:126]
+3. `TensorImpl::decref_pyobject()` confirmed present in nv26.01 libtorch ABI — causal-conv1d 1.6.x builds cleanly without the patched 1.5.0.post8 fallback.
+4. mamba-ssm `selective_scan_cuda` try/except patch retained (Docker OCI workers have no GPU access during build regardless of base image).
+5. `MAX_JOBS=8` and `-j8` cmake caps added to prevent OOM on Grace CPU (72 cores × 2 GB/job was OOM'ing).
+6. Smoke test passes on GB10 / DGX Spark.
+
+### Phase 1b: Rebase to 26.04
+
+1. Change the base image to `FROM --platform=linux/arm64 nvcr.io/nvidia/pytorch:26.04-py3`.
+2. 26.04 ships CUDA 13.2.1 and PyTorch 2.12 — check `TORCH_CUDA_ARCH_LIST` still covers the right arches.
+3. Re-check `TensorImpl::decref_pyobject()` presence in the 26.04 torch ABI (`nm -D` on libtorch_cpu.so) to confirm causal-conv1d 1.6.x still builds cleanly.
+4. Rebuild all extensions (causal-conv1d, mamba-ssm, bitsandbytes) from source and run smoke test on GB10.
+5. Inspect `/etc/pip/constraint.txt` in the new image before installing overrides.[cite:85]
 
 ### Phase 2: Validate packaging behavior
 

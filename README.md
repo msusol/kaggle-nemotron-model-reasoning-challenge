@@ -17,7 +17,8 @@ The target competition is the **NVIDIA Nemotron Model Reasoning Challenge** on K
 ├── CLAUDE.md
 ├── TODO.md
 ├── README.md
-├── Dockerfile.gb10
+├── Dockerfile.gb10                      # primary build (26.01-py3)
+├── Dockerfile.gb10-25                   # archived 25.12-py3 baseline
 ├── .clinerules/
 │   ├── 01-global.md
 │   ├── 02-plan-and-todo-sync.md
@@ -42,6 +43,7 @@ The target competition is the **NVIDIA Nemotron Model Reasoning Challenge** on K
 │   ├── submission-checklist.md
 │   └── submission-layout.md
 └── scripts/
+    ├── build_image.sh               # builds Docker image with GPU-capable buildkitd
     ├── load_config.sh               # exports configs/nemotron.yaml as env vars
     ├── run_smoke_test.sh
     ├── run_train.sh
@@ -56,21 +58,31 @@ The target competition is the **NVIDIA Nemotron Model Reasoning Challenge** on K
 ### 1. Build the image
 
 ```bash
-docker build -f Dockerfile.gb10 -t nemotron-gb10:latest .
+bash scripts/build_image.sh
 ```
 
-**GB10 / aarch64**: Always build the image directly on the GB10 — do not import an image built on
-an x86\_64 machine. The `causal_conv1d` and `mamba_ssm` CUDA extensions must be compiled for
-`aarch64 + sm_120`. If you suspect the mamba/causal\_conv1d layers were cached from a foreign
-architecture, force a recompile:
+**GB10 / aarch64**: Always build directly on the GB10 — never import an image built on x86\_64.
+The `causal_conv1d` and `mamba_ssm` CUDA extensions must be compiled for `aarch64 + sm_120`.
+
+**`selective_scan_cuda` / mamba-ssm note**: Docker OCI workers have isolated device namespaces;
+GPU devices are not accessible during `docker build` on this system (confirmed: privileged
+buildkitd daemons, `[worker.oci] privileged=true`, and TCP remote builders were all attempted).
+`selective_scan_cuda` therefore cannot compile at build time and is patched with `try/except` in
+the Dockerfile so mamba-ssm imports cleanly. This is safe: Nemotron-H uses Mamba-2 Triton
+kernels exclusively and never calls the legacy `selective_scan_cuda` path.
+
+To force a full recompile of the mamba/causal-conv1d layers (e.g., after a base-image update):
 
 ```bash
-docker build \
-  -f Dockerfile.gb10 \
-  --build-arg MAMBA_REBUILD="$(date +%s)" \
-  -t nemotron-gb10:latest \
-  .
+bash scripts/build_image.sh "" --fresh
 ```
+
+The archived 25.12-py3 baseline: `bash scripts/build_image.sh 25`
+Force-recompile it: `bash scripts/build_image.sh 25 --fresh`
+
+**OOM note**: CUDA extension compilation is memory-intensive. Both Dockerfiles cap parallel
+jobs at `MAX_JOBS=8` for `pip install --no-binary` steps and `-j8` for the bitsandbytes cmake
+build (previously `-j$(nproc)` = 72 jobs on Grace, which OOM'd the DGX Spark).
 
 ### 2. Run the smoke test
 

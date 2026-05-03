@@ -1,9 +1,12 @@
 import glob
 import os
 import threading
+import warnings
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import LoraConfig, get_peft_model
+
+warnings.filterwarnings("ignore", category=UserWarning, module="torch.library")
 
 
 def _triton_watcher(stop: threading.Event) -> None:
@@ -28,10 +31,15 @@ def main():
     print(f"Loading tokenizer: {MODEL_ID}")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
 
+    cuda_ok = torch.cuda.is_available()
+    print(f"CUDA available: {cuda_ok}  |  devices: {torch.cuda.device_count()}")
+    if cuda_ok:
+        print(f"  GPU 0: {torch.cuda.get_device_name(0)}")
+
     print(f"Loading model: {MODEL_ID}")
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_ID,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map="auto",
         max_memory=MAX_MEMORY,
         trust_remote_code=True,

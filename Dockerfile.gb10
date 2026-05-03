@@ -1,0 +1,74 @@
+# Nemotron LoRA training image for NVIDIA GB10 / DGX Spark style systems.
+# Base image: NVIDIA optimized PyTorch container with Blackwell support.
+# NVIDIA notes Blackwell optimization from 25.01 onward, and Nemotron 3 Nano
+# HF examples are tested with Transformers 4.57.3.
+
+FROM nvcr.io/nvidia/pytorch:25.12-py3
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/workspace/.cache/huggingface \
+    TRANSFORMERS_CACHE=/workspace/.cache/huggingface \
+    HUGGINGFACE_HUB_CACHE=/workspace/.cache/huggingface \
+    TOKENIZERS_PARALLELISM=false \
+    BASE_MODEL_ID=nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 \
+    ADAPTER_OUTPUT_DIR=/workspace/output/adapter \
+    SUBMISSION_DIR=/workspace/output/submission \
+    PYTHONPATH=/workspace/bitsandbytes
+
+WORKDIR /workspace
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git git-lfs wget curl vim nano build-essential cmake pkg-config unzip zip \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN git lfs install
+RUN python -m pip install --upgrade pip setuptools wheel packaging
+RUN python -m pip uninstall -y apex || true
+
+RUN pip install \
+    "transformers==4.57.3" \
+    "tokenizers>=0.21,<0.22" \
+    "datasets==3.2.0" \
+    "accelerate==1.3.0" \
+    "peft==0.14.0" \
+    "trl<0.16.0" \
+    "torchao==0.16.0" \
+    "sentencepiece" \
+    "safetensors" \
+    "scipy" \
+    "evaluate" \
+    "scikit-learn" \
+    "pydantic" \
+    "pandas" \
+    "tqdm" \
+    "jsonschema" \
+    "huggingface_hub" \
+    "dspy-ai>=2.4.0" \
+    "fastapi" \
+    "uvicorn[standard]" \
+    "pyyaml" \
+    "gradio" \
+    "neo4j"
+
+RUN pip install scikit-build-core
+RUN git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git /workspace/bitsandbytes \
+ && cd /workspace/bitsandbytes \
+ && cmake -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY="80;86;87;89;90;120;121" -S . -B build \
+ && cmake --build build --config Release -j"$(nproc)" \
+ && pip install -e . --no-build-isolation
+
+RUN mkdir -p \
+    /workspace/data \
+    /workspace/configs \
+    /workspace/scripts \
+    /workspace/output \
+    /workspace/.cache/huggingface
+
+COPY *.py /workspace/
+COPY data /workspace/data
+COPY configs /workspace/configs
+COPY scripts /workspace/scripts
+
+CMD ["/bin/bash"]

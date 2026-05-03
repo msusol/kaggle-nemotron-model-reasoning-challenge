@@ -1,0 +1,2 @@
+{"prompt":"What is 8 * 7?","response":"8 * 7 = 56.\nFinal answer: \\boxed{56}","system":"You are a careful reasoning model. Solve the problem step by step and end with Final answer: \\boxed{...}."}
+{"prompt":"If a triangle has base 10 and height 6, what is its area?","response":"The area is 1/2 * base * height.\n1/2 * 10 * 6 = 30.\nFinal answer: \\boxed{30}","system":"You are a careful reasoning model. Solve the problem step by step and end with Final answer: \\boxed{...}."}

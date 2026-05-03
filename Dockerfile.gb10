@@ -29,7 +29,6 @@ RUN python -m pip uninstall -y apex || true
 
 RUN pip install \
     "transformers==4.57.3" \
-    "tokenizers>=0.21,<0.22" \
     "datasets==3.2.0" \
     "accelerate==1.3.0" \
     "peft==0.14.0" \

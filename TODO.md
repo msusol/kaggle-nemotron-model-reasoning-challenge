@@ -35,8 +35,9 @@
 - [x] Add `scripts/smoke_test_nemotron.py`
 - [x] Add `scripts/validate_metric.py`
 - [x] Add `scripts/package_submission.sh`
-- [ ] Create `configs/` directory or remove `COPY configs` from `Dockerfile.gb10` — directory missing, image build will fail
-- [ ] Build image and run smoke test inside container to confirm stack is functional end-to-end
+- [x] Create `configs/` directory or remove `COPY configs` from `Dockerfile.gb10` — directory missing, image build will fail
+- [x] Build image — `nemotron-gb10:latest` builds successfully
+- [ ] Run smoke test inside container to confirm stack is functional end-to-end
 
 ## Submission Checklist
 
@@ -68,9 +69,10 @@
 4. Run `python scripts/validate_metric.py` and verify accuracy before packaging
 
 ### DSPy + PEFT Migration Plan
+
 1. Confirm Nemotron LoRA target module names (inspect model architecture)
 2. Design DSPy offline data generation pipeline for synthetic reasoning traces
 
 ### Dockerfile GB10 Adaptation
-1. Resolve missing `configs/` directory to unblock image build
-2. Build image and run smoke test inside container
+
+1. Run smoke test inside container to confirm stack is functional end-to-end

@@ -63,9 +63,10 @@ architecture 'compute_53'`.
 **Fix**: clone from GitHub, patch `setup.py` lines 172–187 to replace the arch block with
 `sm_80/sm_90/sm_120`, build with `CAUSAL_CONV1D_FORCE_BUILD=TRUE`.
 
-The causal_conv1d 1.5.x patch is in `Dockerfile.gb10-25` (25.12 archive). `Dockerfile.gb10`
-(26.01 primary) uses causal_conv1d 1.6.x directly — `decref_pyobject` is present in the
-nv26.01 torch ABI. The mamba_ssm try/except patch is **active in both** Dockerfiles. Pass
+The causal_conv1d 1.5.x patch is in `Dockerfile.gb10-25-12` (25.12 archive). `Dockerfile.gb10`
+(26.04 primary) and `Dockerfile.gb10-26-01` use causal_conv1d 1.6.x directly — `decref_pyobject`
+is present in the nv26.01+ torch ABI. The mamba_ssm try/except patch is **active in all**
+Dockerfiles. Pass
 `--build-arg MAMBA_REBUILD=$(date +%s)` to force recompile after a cached foreign-arch layer.
 
 ### OOM during build — MAX_JOBS and cmake parallelism

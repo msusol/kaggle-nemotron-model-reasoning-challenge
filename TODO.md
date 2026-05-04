@@ -6,7 +6,8 @@
 - [x] Run `scripts/smoke_test_nemotron.py` — verify tokenizer load, model load, generation, and adapter save
 - [x] Confirm saved adapter directory contains `adapter_config.json`
 - [x] Evaluate NVIDIA PyTorch container migration `25.12-py3` → `26.01-py3` per `plans/pytorch-container-migration-plan.md`
-- [ ] Evaluate NVIDIA PyTorch container migration `26.01-py3` → `26.04-py3` — revalidate causal-conv1d, mamba-ssm, bitsandbytes, and smoke test on GB10
+- [x] Evaluate NVIDIA PyTorch container migration `26.01-py3` → `26.04-py3` — revalidate causal-conv1d, mamba-ssm, bitsandbytes, and smoke test on GB10
+- [x] Update `torchao` pin in `Dockerfile.gb10` — bumped `0.16.0` → `0.17.0` for PyTorch 2.12 (pytorch/ao#2919)
 
 ### Phase 2 — Adapt the fine-tuning objective
 - [ ] Populate `data/train.jsonl` with reasoning tasks ending in `Final answer: \boxed{...}` (currently 3 toy examples)

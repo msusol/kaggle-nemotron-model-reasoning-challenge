@@ -5,7 +5,7 @@
 | Migration | Status | Notes |
 |---|---|---|
 | `25.12-py3` → `26.01-py3` | ✅ Complete | causal-conv1d 1.6.x builds cleanly; mamba-ssm patched; smoke test passing |
-| `26.01-py3` → `26.04-py3` | 🔲 Planned | CUDA 13.2.1, PyTorch 2.12; revalidation required (see Phase 1b below) |
+| `26.01-py3` → `26.04-py3` | ✅ Complete | CUDA 13.2.1, PyTorch 2.12; smoke test passes; torchao pin needs update |
 
 ## Overview
 
@@ -46,13 +46,16 @@ NVIDIA also documents that the PyTorch containers ship with `/etc/pip/constraint
 5. `MAX_JOBS=8` and `-j8` cmake caps added to prevent OOM on Grace CPU (72 cores × 2 GB/job was OOM'ing).
 6. Smoke test passes on GB10 / DGX Spark.
 
-### Phase 1b: Rebase to 26.04
+### Phase 1b: Rebase to 26.04 ✅ COMPLETE
 
-1. Change the base image to `FROM --platform=linux/arm64 nvcr.io/nvidia/pytorch:26.04-py3`.
-2. 26.04 ships CUDA 13.2.1 and PyTorch 2.12 — check `TORCH_CUDA_ARCH_LIST` still covers the right arches.
-3. Re-check `TensorImpl::decref_pyobject()` presence in the 26.04 torch ABI (`nm -D` on libtorch_cpu.so) to confirm causal-conv1d 1.6.x still builds cleanly.
-4. Rebuild all extensions (causal-conv1d, mamba-ssm, bitsandbytes) from source and run smoke test on GB10.
-5. Inspect `/etc/pip/constraint.txt` in the new image before installing overrides.[cite:85]
+1. ✅ Changed base image to `FROM --platform=linux/arm64 nvcr.io/nvidia/pytorch:26.04-py3`.
+2. ✅ CUDA 13.2.1, PyTorch 2.12.0a0 — `TORCH_CUDA_ARCH_LIST` unchanged, build succeeded.
+3. ✅ causal-conv1d 1.6.x builds cleanly — `TensorImpl::decref_pyobject()` present in nv26.04 ABI.
+4. ✅ GPU confirmed at runtime: `CUDA available: True | GPU 0: NVIDIA GB10`.
+5. ✅ Smoke test passes — generation, Triton JIT (100 kernels), PEFT adapter save all succeed.
+6. ✅ Triton autotuning `out of resource` on first config is normal — falls back to valid config.
+7. ✅ `torchao` bumped `0.16.0` → `0.17.0` — resolves PyTorch 2.12 cpp extension skip (pytorch/ao#2919).
+8. ✅ `/etc/pip/constraint.txt` in 26.04 has only nvidia-internal entries — no conflicts with our pins.
 
 ### Phase 2: Validate packaging behavior
 

@@ -1,14 +1,15 @@
-# Nemotron LoRA training image — NVIDIA PyTorch 26.01 rebase for GB10 / DGX Spark.
-# See plans/pytorch-container-migration-plan.md for migration rationale.
+# Nemotron LoRA training image — NVIDIA PyTorch 26.04 rebase for GB10 / DGX Spark.
+# See plans/pytorch-container-migration-plan.md Phase 1b for migration rationale.
 #
-# Key differences from Dockerfile.gb10 (25.12 base):
-#   - CUDA 13.1 (was 13.0)
-#   - PyTorch nv26.01 build — TensorImpl::decref_pyobject() now present (confirmed ×2)
-#   - causal-conv1d: clean 1.6.x source build; no ABI fallback to 1.5.0.post8 needed
-#   - Active /etc/pip/constraint.txt has only nvidia-internal entries — no conflicts
-#   - All Python package pins identical to Dockerfile.gb10 (Phase 1: isolate base change)
+# Key differences from Dockerfile.gb10-26-01 (26.01 base):
+#   - CUDA 13.2.1 (was 13.1)
+#   - PyTorch nv26.04 build (2.12 series)
+#   - TensorImpl::decref_pyobject() presence unconfirmed — first build will reveal
+#     if causal-conv1d 1.6.x still links cleanly or needs the 1.5.0.post8 fallback
+#   - torchao bumped 0.16.0 → 0.17.0 (0.16.0 skips cpp extensions on PyTorch 2.12; pytorch/ao#2919)
+#   - All other Python package pins identical to Dockerfile.gb10-26-01
 
-FROM --platform=linux/arm64 nvcr.io/nvidia/pytorch:26.01-py3
+FROM --platform=linux/arm64 nvcr.io/nvidia/pytorch:26.04-py3
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -22,6 +23,18 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONPATH=/workspace/bitsandbytes
 
 WORKDIR /workspace
+
+# Print base environment for build log validation.
+RUN python3 -c "import torch, sys; \
+    print('Python:', sys.version); \
+    print('PyTorch:', torch.__version__); \
+    import subprocess; \
+    v = subprocess.run(['nvcc','--version'], capture_output=True, text=True).stdout.strip().splitlines()[-1]; \
+    print('CUDA toolkit:', v)"
+
+# Show active pip constraints so any conflicts with our pins are visible in the build log.
+RUN echo '=== /etc/pip/constraint.txt ===' \
+ && cat /etc/pip/constraint.txt || echo '(not present)'
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git git-lfs wget curl vim nano build-essential cmake pkg-config unzip zip \
@@ -37,7 +50,7 @@ RUN pip install \
     "accelerate==1.3.0" \
     "peft==0.14.0" \
     "trl==0.15.2" \
-    "torchao==0.16.0" \
+    "torchao==0.17.0" \
     "huggingface_hub==0.36.2" \
     "sentencepiece" \
     "safetensors" \
@@ -55,9 +68,10 @@ RUN pip install \
     "gradio" \
     "neo4j"
 
-# causal-conv1d: 1.6.x builds cleanly on 26.01 — TensorImpl::decref_pyobject() is present
-# in the nv26.01 libtorch ABI (was missing on 25.12, requiring the patched 1.5.0.post8 in
-# Dockerfile.gb10-25). TORCH_CUDA_ARCH_LIST targets only arches CUDA 13.1 supports (≥ 7.0).
+# causal-conv1d: attempting 1.6.x source build on 26.04. If TensorImpl::decref_pyobject()
+# is absent from the nv26.04 libtorch ABI this step will compile but fail at import time
+# with an undefined symbol — fall back to the patched 1.5.0.post8 strategy in
+# Dockerfile.gb10-25-12 if so. TORCH_CUDA_ARCH_LIST targets arches CUDA 13.2 supports (≥ 7.0).
 #
 # mamba-ssm / selective_scan_cuda: Docker RUN steps run in OCI worker containers with
 # isolated device namespaces — GPU devices from the host are never visible, so

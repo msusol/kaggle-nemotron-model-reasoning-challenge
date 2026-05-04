@@ -17,8 +17,9 @@ The target competition is the **NVIDIA Nemotron Model Reasoning Challenge** on K
 ├── CLAUDE.md
 ├── TODO.md
 ├── README.md
-├── Dockerfile.gb10                      # primary build (26.01-py3)
-├── Dockerfile.gb10-25                   # archived 25.12-py3 baseline
+├── Dockerfile.gb10                      # primary build (26.04-py3)
+├── Dockerfile.gb10-26-01                # archived 26.01-py3 baseline
+├── Dockerfile.gb10-25-12                # archived 25.12-py3 baseline
 ├── .clinerules/
 │   ├── 01-global.md
 │   ├── 02-plan-and-todo-sync.md
@@ -77,8 +78,9 @@ To force a full recompile of the mamba/causal-conv1d layers (e.g., after a base-
 bash scripts/build_image.sh "" --fresh
 ```
 
-The archived 25.12-py3 baseline: `bash scripts/build_image.sh 25`
-Force-recompile it: `bash scripts/build_image.sh 25 --fresh`
+Archived baselines:
+- 26.01: `bash scripts/build_image.sh 26-01`
+- 25.12: `bash scripts/build_image.sh 25-12`
 
 **OOM note**: CUDA extension compilation is memory-intensive. Both Dockerfiles cap parallel
 jobs at `MAX_JOBS=8` for `pip install --no-binary` steps and `-j8` for the bitsandbytes cmake

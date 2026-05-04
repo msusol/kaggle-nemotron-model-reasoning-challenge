@@ -11,3 +11,4 @@ Project rules are in [.clinerules/](.clinerules/):
 - [13-docker-gpu-gb10.md](.clinerules/13-docker-gpu-gb10.md) — Use `--privileged -e NVIDIA_VISIBLE_DEVICES=all` for GPU on GB10 (not `--gpus all --runtime=nvidia`)
 - [14-citations.md](.clinerules/14-citations.md) — Use `[cite:N]` inline; register in `plans/CITATIONS.md`; number = max existing + 1
 - [15-readme-sync.md](.clinerules/15-readme-sync.md) — Update README.md layout and commands when scripts, data files, or Dockerfiles change
+- [16-leaderboard.md](.clinerules/16-leaderboard.md) — Update `plans/leaderboard.md` after each completed training run and validation pass

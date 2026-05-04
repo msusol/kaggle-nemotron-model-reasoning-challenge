@@ -36,6 +36,12 @@ This file maps the inline `[cite:N]` references used across the generated Markdo
 - `[cite:136]` Transformers – PyPI — <https://pypi.org/project/transformers/>[cite:136]
 - `[cite:137]` Transformers Releases – Hugging Face GitHub — <https://github.com/huggingface/transformers/releases>[cite:137]
 - `[cite:138]` Transformers 4.57.3 needs older huggingface-hub – GitHub issue #42670 — <https://github.com/huggingface/transformers/issues/42670>[cite:138]
+- `[cite:139]` KV Caching Issue with NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 – HF discussion #14 — NVIDIA confirms HF Transformers doesn't support KV/MambaCache for NemotronH; recommends vLLM, TRT-LLM, SGLang, Llama.cpp for production inference — <https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16/discussions/14>[cite:139]
+- `[cite:140]` HybridMambaAttentionDynamicCache not valid – HF Nemotron-Nano-9B discussion #14 — Monkey-patching workaround still triggers cache warning; cache not used in PyTorch inference — <https://huggingface.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2/discussions/14>[cite:140]
+- `[cite:141]` Bug Report: `model.generate()` does not use cache_params – HF Nemotron-3-Nano-4B discussion #2 — <https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16/discussions/2>[cite:141]
+- `[cite:142]` NVIDIA Nemotron-3-Nano-30B-A3B vLLM Recipe – vLLM Recipes Docs — <https://docs.vllm.ai/projects/recipes/en/latest/NVIDIA/Nemotron-3-Nano-30B-A3B.html>[cite:142]
+- `[cite:143]` Deploying NVIDIA Nemotron-3-Nano with vLLM – NeMo GitHub cookbook — <https://github.com/NVIDIA-NeMo/Nemotron/blob/main/usage-cookbook/Nemotron-3-Nano/vllm_cookbook.ipynb>[cite:143]
+- `[cite:144]` NemotronH – Hugging Face Transformers Documentation — <https://huggingface.co/docs/transformers/model_doc/nemotron_h>[cite:144]
 
 ## Usage note
 

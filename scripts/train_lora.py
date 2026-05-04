@@ -3,14 +3,13 @@ import os
 
 import torch
 from datasets import load_dataset
-from peft import LoraConfig
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
-    TrainingArguments,
 )
-from trl import SFTTrainer
+from trl import SFTConfig, SFTTrainer
 
 DEFAULT_MODEL = os.environ.get("BASE_MODEL_ID", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16")
 
@@ -60,18 +59,29 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model_kwargs = dict(trust_remote_code=True, device_map="auto")
+    device = {"": 0}  # force all layers onto GPU 0 — no CPU offload on GB10
     if args.use_4bit:
-        model_kwargs["quantization_config"] = BitsAndBytesConfig(
+        bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_use_double_quant=True,
             bnb_4bit_compute_dtype=torch.bfloat16,
         )
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_id,
+            quantization_config=bnb_config,
+            device_map=device,
+            dtype=torch.bfloat16,
+            trust_remote_code=True,
+        )
+        model = prepare_model_for_kbit_training(model)
     else:
-        model_kwargs["dtype"] = torch.bfloat16
-
-    model = AutoModelForCausalLM.from_pretrained(args.model_id, **model_kwargs)
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_id,
+            device_map=device,
+            dtype=torch.bfloat16,
+            trust_remote_code=True,
+        )
     model.config.use_cache = False
 
     peft_config = LoraConfig(
@@ -82,6 +92,7 @@ def main():
         task_type="CAUSAL_LM",
         target_modules="all-linear",
     )
+    model = get_peft_model(model, peft_config, autocast_adapter_dtype=False)
 
     data_files = {"train": args.train_file}
     if args.valid_file:
@@ -92,7 +103,7 @@ def main():
     if "validation" in ds:
         ds["validation"] = ds["validation"].map(lambda x: format_example(x, tokenizer), remove_columns=ds["validation"].column_names)
 
-    train_args = TrainingArguments(
+    train_args = SFTConfig(
         output_dir=args.output_dir,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=max(1, args.batch_size),
@@ -107,17 +118,15 @@ def main():
         warmup_ratio=0.03,
         lr_scheduler_type="cosine",
         max_grad_norm=1.0,
+        max_seq_length=args.max_seq_length,
     )
 
     trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         train_dataset=ds["train"],
         eval_dataset=ds.get("validation"),
-        peft_config=peft_config,
         args=train_args,
-        dataset_text_field="text",
-        max_seq_length=args.max_seq_length,
     )
 
     trainer.train()

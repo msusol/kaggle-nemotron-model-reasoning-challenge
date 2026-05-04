@@ -14,16 +14,38 @@
 - [x] Verify prompt templates enforce `Final answer: \boxed{...}` as the final assistant line — `train_lora.py:format_example` uses chat template with `response` field; system prompt enforces the format
 - [x] Verify `scripts/validate_metric.py` parses boxed answers and applies Kaggle-style correctness comparison — extracts last `\boxed{...}`, falls back to last number/word; `is_correct` uses exact string match + float tolerance; `valid_labels.jsonl` generated with raw answers
 - [x] Audit `max_new_tokens` budget — bumped `64 → 512` in `smoke_test_nemotron.py`; inference script will need `512–2048` for full reasoning chains (Phase 3)
+- [x] Run baseline training with `scripts/train_lora.py` — 1 epoch, r=32, bf16, no DSPy — complete (v0.1-baseline, train_loss=5.905, val_loss=0.663, val_acc=80.6%)
+- [x] Run `scripts/validate_metric.py` against `data/valid.jsonl` to confirm boxed-answer accuracy on baseline adapter — 43.5% (413/950)
+- [x] Run `scripts/package_submission.sh` on baseline adapter — `output/submission/submission.zip` (1.7GB, 6 files: adapter_config.json, adapter_model.safetensors, tokenizer files)
+- [ ] Submit `output/submission/submission.zip` to Kaggle to establish a public leaderboard score
 
-### Phase 3 — Keep DSPy offline
+### Phase 3 — Improve with DSPy
 - [ ] Build DSPy offline pipeline to generate synthetic reasoning traces
 - [ ] Transfer DSPy-optimized outputs into `data/train.jsonl` as training examples
+- [ ] Re-run training on DSPy-enriched data (v1.0) and compare against v0.1-baseline in leaderboard
 
 ### Phase 4 — Package the submission
-- [ ] Run full training with `scripts/train_lora.py` against populated dataset
-- [ ] Run `scripts/validate_metric.py` against `data/valid.jsonl` to confirm boxed-answer accuracy
-- [ ] Run `scripts/package_submission.sh` to produce `submission.zip`
+- [ ] Run `scripts/package_submission.sh` on best adapter to produce `submission.zip`
 - [ ] Verify `submission.zip` structure: contains `adapter_config.json` and adapter weights, nothing else
+
+## Inference Improvements (post-baseline)
+
+See `plans/nemotron_inference_improvement_plan.md` for full details. [cite:139][cite:140][cite:141][cite:142][cite:143][cite:144]
+
+KV cache is broken in HF Transformers for NemotronH — NVIDIA confirmed [cite:139]; `cache_implementation="hybrid"` ignored; monkey-patch workaround also fails [cite:140]. Current `infer_lora.py` runs without cache (~7.5s/it). Production path is vLLM with a merged adapter [cite:142][cite:143].
+
+- [ ] Benchmark current `infer_lora.py` — record tokens/sec, total runtime, `max_new_tokens`, hardware
+- [ ] Create `scripts/merge_lora.py` — load base + adapter, call `merge_and_unload()`, save to `output/merged_<timestamp>/`
+- [ ] Validate output parity — run fixed sample set through both HF+adapter and merged-model paths
+- [ ] Create `scripts/serve_vllm.sh` — stand up vLLM with merged model using NVIDIA's recipe [cite:142]
+- [ ] Create `scripts/infer_vllm.py` — thin client that submits prompts and writes competition-format predictions
+- [ ] Benchmark vLLM throughput vs baseline on GB10
+- [ ] Add `--backend hf|vllm` switch to inference pipeline; default submission to vLLM once parity confirmed
+
+## Training Improvements (post-baseline)
+- [ ] Switch to pre-tokenized dataset + `dataset_text_field=None` / `max_seq_length=None` in `SFTConfig` — bypasses TRL's ChatML conversion step, removes risk of double chat-template application on future runs
+- [ ] Add early stopping for multi-epoch runs — `EarlyStoppingCallback(patience=3)`, `eval_strategy="steps"`, `eval_steps=100`, `load_best_model_at_end=True`, `metric_for_best_model="eval_loss"` in `SFTConfig`
+- [ ] Consider `gradient_checkpointing` if memory becomes a concern on longer sequences
 
 ## DSPy + PEFT Migration Plan
 - [ ] Confirm LoRA target module names for Nemotron-3-Nano-30B before launching long runs
@@ -62,21 +84,8 @@
 
 ### Competition checks
 - [ ] Submission deadline and team-merger deadline reviewed
-- [ ] Public notebook and write-up plan exist for prize eligibility
-
-## Next steps
-
-### Implementation Plan
-1. Run `python scripts/smoke_test_nemotron.py` — first blocking step before any training
-2. Populate `data/train.jsonl` with full reasoning dataset
-3. Run `python scripts/train_lora.py` with populated data
-4. Run `python scripts/validate_metric.py` and verify accuracy before packaging
-
-### DSPy + PEFT Migration Plan
-
-1. Confirm Nemotron LoRA target module names (inspect model architecture)
-2. Design DSPy offline data generation pipeline for synthetic reasoning traces
-
-### Dockerfile GB10 Adaptation
-
-1. Run smoke test inside container to confirm stack is functional end-to-end
+- [ ] Upload final adapter to HF Hub or Kaggle dataset so notebook can load it (needed for Section 3 of `notebook/kaggle_prize_eligibility_outline.ipynb`)
+- [ ] Update notebook Section 6 training config to match actual run — `SFTConfig`, `dtype`, `get_peft_model`, no deprecated kwargs
+- [ ] Fill in notebook Section 8 (Results) with validation accuracy and Kaggle leaderboard score
+- [ ] Fill in notebook Section 9 (Reproducibility) with adapter repo ID, Docker image tag, training script path
+- [ ] Make notebook public on Kaggle and confirm it runs end-to-end

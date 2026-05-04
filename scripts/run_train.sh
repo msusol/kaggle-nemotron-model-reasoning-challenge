@@ -16,6 +16,11 @@ if [[ "${USE_4BIT:-false}" == "true" ]]; then
   USE_4BIT_FLAG="--use-4bit"
 fi
 
+RUN_TS="$(date +%Y%m%d_%H%M%S)"
+LOG_FILE="${WORKSPACE}/output/train_${RUN_TS}.log"
+ADAPTER_DIR="${WORKSPACE}/output/adapter_${RUN_TS}"
+mkdir -p "${WORKSPACE}/output"
+
 docker run --rm --privileged \
   -e NVIDIA_VISIBLE_DEVICES=all \
   --ipc=host \
@@ -31,7 +36,7 @@ docker run --rm --privileged \
     --model-id "${BASE_MODEL}" \
     --train-file "${TRAIN_FILE}" \
     --valid-file "${VALID_FILE}" \
-    --output-dir "${OUTPUT_DIR}" \
+    --output-dir "${ADAPTER_DIR}" \
     --max-seq-length "${MAX_SEQ_LENGTH}" \
     --batch-size "${BATCH_SIZE}" \
     --grad-accum "${GRAD_ACCUM}" \
@@ -40,4 +45,7 @@ docker run --rm --privileged \
     --lora-r "${LORA_R}" \
     --lora-alpha "${LORA_ALPHA}" \
     --lora-dropout "${LORA_DROPOUT}" \
-    ${USE_4BIT_FLAG}
+    ${USE_4BIT_FLAG} \
+  2>&1 | tee "${LOG_FILE}"
+echo "Log saved to ${LOG_FILE}"
+echo "Adapter saved to ${ADAPTER_DIR}"

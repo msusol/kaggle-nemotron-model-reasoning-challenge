@@ -61,7 +61,7 @@ def main():
     watcher = threading.Thread(target=_triton_watcher, args=(stop_watcher,), daemon=True)
     watcher.start()
     with torch.no_grad():
-        outputs = model.generate(**inputs, max_new_tokens=64, do_sample=False)
+        outputs = model.generate(**inputs, max_new_tokens=512, do_sample=False)
     stop_watcher.set()
     watcher.join(timeout=5)
     text = tokenizer.decode(outputs[0], skip_special_tokens=True)

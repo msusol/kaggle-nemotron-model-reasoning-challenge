@@ -66,7 +66,8 @@ RUN pip install \
     "uvicorn[standard]" \
     "pyyaml" \
     "gradio" \
-    "neo4j"
+    "neo4j" \
+    "kagglehub"
 
 # causal-conv1d: attempting 1.6.x source build on 26.04. If TensorImpl::decref_pyobject()
 # is absent from the nv26.04 libtorch ABI this step will compile but fail at import time

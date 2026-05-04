@@ -10,10 +10,10 @@
 - [x] Update `torchao` pin in `Dockerfile.gb10` — bumped `0.16.0` → `0.17.0` for PyTorch 2.12 (pytorch/ao#2919)
 
 ### Phase 2 — Adapt the fine-tuning objective
-- [ ] Populate `data/train.jsonl` with reasoning tasks ending in `Final answer: \boxed{...}` (currently 3 toy examples)
-- [ ] Verify prompt templates enforce `Final answer: \boxed{...}` as the final assistant line
-- [ ] Verify `scripts/validate_metric.py` parses boxed answers and applies Kaggle-style correctness comparison
-- [ ] Audit `max_new_tokens` budget — smoke test shows model gets cut off mid-answer at 64 tokens; competition outputs must reach `Final answer: \boxed{...}` before the limit; set a budget that covers full reasoning chain + closing line
+- [x] Populate `data/train.jsonl` with reasoning tasks ending in `Final answer: \boxed{...}` — 8,550 train + 950 valid from competition train.csv (pattern recognition: bit manipulation, ciphers, unit conversion)
+- [x] Verify prompt templates enforce `Final answer: \boxed{...}` as the final assistant line — `train_lora.py:format_example` uses chat template with `response` field; system prompt enforces the format
+- [x] Verify `scripts/validate_metric.py` parses boxed answers and applies Kaggle-style correctness comparison — extracts last `\boxed{...}`, falls back to last number/word; `is_correct` uses exact string match + float tolerance; `valid_labels.jsonl` generated with raw answers
+- [x] Audit `max_new_tokens` budget — bumped `64 → 512` in `smoke_test_nemotron.py`; inference script will need `512–2048` for full reasoning chains (Phase 3)
 
 ### Phase 3 — Keep DSPy offline
 - [ ] Build DSPy offline pipeline to generate synthetic reasoning traces

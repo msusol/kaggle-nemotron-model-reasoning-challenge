@@ -31,8 +31,9 @@ The target competition is the **NVIDIA Nemotron Model Reasoning Challenge** on K
 ├── configs/
 │   └── nemotron.yaml                # training hyperparameters
 ├── data/
-│   ├── train.jsonl
-│   └── valid.jsonl
+│   ├── train.jsonl          # 8,550 examples (90% split of competition train.csv)
+│   ├── valid.jsonl          # 950 examples  (10% split)
+│   └── valid_labels.jsonl   # {"id","answer"} pairs for validate_metric.py
 ├── plans/
 │   ├── CITATIONS.md
 │   ├── competition-overview.md
@@ -44,10 +45,12 @@ The target competition is the **NVIDIA Nemotron Model Reasoning Challenge** on K
 │   ├── submission-checklist.md
 │   └── submission-layout.md
 └── scripts/
-    ├── build_image.sh               # builds Docker image with GPU-capable buildkitd
-    ├── load_config.sh               # exports configs/nemotron.yaml as env vars
+    ├── build_image.sh               # builds Docker image
+    ├── run_download.sh              # downloads competition data via kagglehub
     ├── run_smoke_test.sh
     ├── run_train.sh
+    ├── load_config.sh               # exports configs/nemotron.yaml as env vars
+    ├── download_data.py             # kagglehub download + train/valid JSONL conversion
     ├── smoke_test_nemotron.py
     ├── train_lora.py
     ├── validate_metric.py
@@ -86,7 +89,22 @@ Archived baselines:
 jobs at `MAX_JOBS=8` for `pip install --no-binary` steps and `-j8` for the bitsandbytes cmake
 build (previously `-j$(nproc)` = 72 jobs on Grace, which OOM'd the DGX Spark).
 
-### 2. Run the smoke test
+### 2. Competition data
+
+`data/train.jsonl` (8,550 ex), `data/valid.jsonl` (950 ex), and `data/valid_labels.jsonl` are
+already committed — a fresh clone is ready to train without re-downloading.
+
+To regenerate from the competition source (e.g. after a dataset update), add `KAGGLE_USERNAME`
+and `KAGGLE_API_TOKEN` to `.env` (or save the token to `~/.kaggle/access_token`) and run:
+
+```bash
+bash scripts/run_download.sh
+```
+
+The kagglehub cache is stored in `<workspace>/.cache/kagglehub/` (persists across runs).
+Use `--download-only` to inspect the file inventory and CSV column headers without converting.
+
+### 3. Run the smoke test
 
 ```bash
 bash scripts/run_smoke_test.sh
@@ -112,12 +130,12 @@ Saved PEFT smoke adapter to: /workspace/output/smoke_adapter
 After the run, `output/smoke_adapter/adapter_config.json` must exist — that confirms the full
 tokenizer → model load → generation → PEFT export stack works end-to-end.
 
-**Memory note**: `smoke_test_nemotron.py` passes `max_memory={0: "20GiB", "cpu": "110GiB"}` to
-`from_pretrained`. This prevents `device_map="auto"` from spilling layers to NVMe (disk offload
-makes 64-token generation take 60+ minutes). If your system has less than ~60 GB of
-GPU + CPU RAM, the test will OOM rather than silently running for hours.
+**Memory note**: `smoke_test_nemotron.py` passes `max_memory={0: "115GiB"}` to `from_pretrained`,
+keeping all shards on the GB10's unified GPU memory and preventing `device_map="auto"` from
+spilling to NVMe (disk offload makes generation take 60+ minutes). Adjust the cap if running
+on a system with less GPU memory.
 
-### 3. First LoRA training run
+### 4. First LoRA training run
 
 Edit `configs/nemotron.yaml` to set hyperparameters, then:
 
@@ -125,7 +143,7 @@ Edit `configs/nemotron.yaml` to set hyperparameters, then:
 bash scripts/run_train.sh
 ```
 
-### 4. Local metric sanity check
+### 5. Local metric sanity check
 
 ```bash
 cat > /workspace/output/preds.jsonl <<'JSONL'
@@ -143,7 +161,7 @@ python /workspace/scripts/validate_metric.py \
   --labels /workspace/output/labels.jsonl
 ```
 
-### 5. Package adapter into `submission.zip`
+### 6. Package adapter into `submission.zip`
 
 ```bash
 bash /workspace/scripts/package_submission.sh \

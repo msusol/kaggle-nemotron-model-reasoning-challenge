@@ -29,7 +29,7 @@ MAX_MEMORY = {0: "115GiB"}
 
 def main():
     print(f"Loading tokenizer: {MODEL_ID}")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 
     cuda_ok = torch.cuda.is_available()
     print(f"CUDA available: {cuda_ok}  |  devices: {torch.cuda.device_count()}")
@@ -42,7 +42,6 @@ def main():
         dtype=torch.bfloat16,
         device_map="auto",
         max_memory=MAX_MEMORY,
-        trust_remote_code=True,
     )
 
     messages = [

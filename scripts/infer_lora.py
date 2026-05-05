@@ -48,7 +48,7 @@ def main():
     args = ap.parse_args()
 
     print(f"Loading tokenizer: {args.model_id}")
-    tokenizer = AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_id)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
@@ -59,7 +59,6 @@ def main():
         dtype=torch.bfloat16,
         device_map="auto",
         max_memory=MAX_MEMORY,
-        trust_remote_code=True,
     )
     print(f"Loading adapter: {args.adapter_dir}")
     model = PeftModel.from_pretrained(model, args.adapter_dir)

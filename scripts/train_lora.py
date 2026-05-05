@@ -55,7 +55,7 @@ def main():
     if args.lora_r > 32:
         raise ValueError("Competition constraint violated: --lora-r must be <= 32")
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_id)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -72,7 +72,6 @@ def main():
             quantization_config=bnb_config,
             device_map=device,
             dtype=torch.bfloat16,
-            trust_remote_code=True,
         )
         model = prepare_model_for_kbit_training(model)
     else:
@@ -80,7 +79,6 @@ def main():
             args.model_id,
             device_map=device,
             dtype=torch.bfloat16,
-            trust_remote_code=True,
         )
     model.config.use_cache = False
 
@@ -119,6 +117,7 @@ def main():
         lr_scheduler_type="cosine",
         max_grad_norm=1.0,
         max_seq_length=args.max_seq_length,
+        gradient_checkpointing=False,
     )
 
     trainer = SFTTrainer(

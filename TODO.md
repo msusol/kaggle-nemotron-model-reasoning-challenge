@@ -32,20 +32,18 @@
 
 See `plans/nemotron_inference_improvement_plan.md` for full details. [cite:139][cite:140][cite:141][cite:142][cite:143][cite:144]
 
-KV cache is broken in HF Transformers for NemotronH — NVIDIA confirmed [cite:139]; `cache_implementation="hybrid"` ignored; monkey-patch workaround also fails [cite:140]. Current `infer_lora.py` runs without cache (~7.5s/it). Production path is vLLM with a merged adapter [cite:142][cite:143].
+KV cache is broken in HF Transformers < 5.3.0 for NemotronH — `prepare_inputs_for_generation()` sends cache as `past_key_values` but `forward()` expects `cache_params`; cache silently dropped, generation runs at ~2 tok/sec [cite:140]. Fix: `transformers >= 5.3.0` has native NemotronH support with correct parameter mapping; drop `trust_remote_code=True` so the library's implementation is used instead of the old buggy `modeling_nemotron_h.py` from the model repo. Expected throughput: ~38 tok/sec (~20× speedup).
 
-- [ ] Benchmark current `infer_lora.py` — record tokens/sec, total runtime, `max_new_tokens`, hardware
-- [ ] Create `scripts/merge_lora.py` — load base + adapter, call `merge_and_unload()`, save to `output/merged_<timestamp>/`
-- [ ] Validate output parity — run fixed sample set through both HF+adapter and merged-model paths
-- [ ] Create `scripts/serve_vllm.sh` — stand up vLLM with merged model using NVIDIA's recipe [cite:142]
-- [ ] Create `scripts/infer_vllm.py` — thin client that submits prompts and writes competition-format predictions
-- [ ] Benchmark vLLM throughput vs baseline on GB10
-- [ ] Add `--backend hf|vllm` switch to inference pipeline; default submission to vLLM once parity confirmed
+- [x] Bump `transformers` to `5.5.3` in `Dockerfile.gb10` — native NemotronH cache fix [cite:140]
+- [x] Drop `trust_remote_code=True` from all model/tokenizer loading in `infer_lora.py`, `train_lora.py`, `smoke_test_nemotron.py`
+- [x] Set `gradient_checkpointing=False` explicitly in `SFTConfig` — NemotronHForCausalLM doesn't declare support; throws ValueError otherwise
+- [ ] Rebuild Docker image and run smoke test to confirm new transformers version loads cleanly
+- [ ] Benchmark `infer_lora.py` throughput before/after — confirm ~38 tok/sec vs prior ~2 tok/sec
 
 ## Training Improvements (post-baseline)
 - [ ] Switch to pre-tokenized dataset + `dataset_text_field=None` / `max_seq_length=None` in `SFTConfig` — bypasses TRL's ChatML conversion step, removes risk of double chat-template application on future runs
 - [ ] Add early stopping for multi-epoch runs — `EarlyStoppingCallback(patience=3)`, `eval_strategy="steps"`, `eval_steps=100`, `load_best_model_at_end=True`, `metric_for_best_model="eval_loss"` in `SFTConfig`
-- [ ] Consider `gradient_checkpointing` if memory becomes a concern on longer sequences
+- [x] Set `gradient_checkpointing=False` explicitly — NemotronHForCausalLM throws ValueError if enabled with native transformers implementation
 
 ## DSPy + PEFT Migration Plan
 - [ ] Confirm LoRA target module names for Nemotron-3-Nano-30B before launching long runs
@@ -55,7 +53,7 @@ KV cache is broken in HF Transformers for NemotronH — NVIDIA confirmed [cite:1
 - [ ] Confirm adapter export via `peft.save_pretrained` produces both `adapter_config.json` and weights
 
 ## Dockerfile GB10 Adaptation
-- [x] Upgrade `transformers` to ≥4.57.3 — pinned at `4.57.3` in `Dockerfile.gb10`
+- [x] Upgrade `transformers` to ≥5.3.0 — pinned at `5.5.3` in `Dockerfile.gb10` (KV cache fix for NemotronH)
 - [x] Add env vars `BASE_MODEL_ID`, `ADAPTER_OUTPUT_DIR`, `SUBMISSION_DIR`
 - [x] Update `bitsandbytes` compute capabilities to include `sm_120`, `sm_121`
 - [x] Add `scripts/smoke_test_nemotron.py`

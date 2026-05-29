@@ -10,5 +10,5 @@
   "enable_internet": true,
   "dataset_sources": [],
   "competition_sources": ["nvidia-nemotron-model-reasoning-challenge"],
-  "kernel_sources": []
+  "kernel_sources": ["ryanholbrook/nvidia-utility-script"]
 }

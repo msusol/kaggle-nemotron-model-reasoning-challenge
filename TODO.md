@@ -17,7 +17,7 @@
 - [x] Run baseline training with `scripts/train_lora.py` — 1 epoch, r=32, bf16, no DSPy — complete (v0.1-baseline, train_loss=5.905, val_loss=0.663, val_acc=80.6%)
 - [x] Run `scripts/validate_metric.py` against `data/valid.jsonl` to confirm boxed-answer accuracy on baseline adapter — 43.5% (413/950)
 - [x] Run `scripts/package_submission.sh` on baseline adapter — `output/submission/submission.zip` (1.7GB, 6 files: adapter_config.json, adapter_model.safetensors, tokenizer files)
-- [ ] Submit `output/submission/submission.zip` to Kaggle to establish a public leaderboard score
+- [x] Submit `output/submission/submission.zip` to Kaggle to establish a public leaderboard score — 0.57 ("Nemotron-3-Nano-30B LoRA Adapter v0.1-baseline")
 
 ### Phase 3 — Improve with DSPy
 - [ ] Build DSPy offline pipeline to generate synthetic reasoning traces

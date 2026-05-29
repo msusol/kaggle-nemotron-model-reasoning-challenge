@@ -1,0 +1,14 @@
+{
+  "id": "gdataranger/nemotron-lora-submission-demo",
+  "title": "Nemotron Lora Submission Demo",
+  "code_file": "nemotron_submission_demo.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": ["nvidia-nemotron-model-reasoning-challenge"],
+  "kernel_sources": []
+}

@@ -48,6 +48,8 @@ docker run --rm --privileged \
     --lora-r "${LORA_R}" \
     --lora-alpha "${LORA_ALPHA}" \
     --lora-dropout "${LORA_DROPOUT}" \
+    --warmup-ratio "${WARMUP_RATIO:-0.03}" \
+    --early-stopping-patience "${EARLY_STOPPING_PATIENCE:-0}" \
     ${USE_4BIT_FLAG} \
   2>&1 | tee "${LOG_FILE}"
 echo "Log saved to ${LOG_FILE}"

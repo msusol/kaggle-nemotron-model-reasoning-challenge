@@ -3,11 +3,13 @@ train_file: data/train.jsonl
 valid_file: data/valid.jsonl
 output_dir: output/adapter
 lora_r: 32
-lora_alpha: 64
+lora_alpha: 32
 lora_dropout: 0.05
-max_seq_length: 2048
+max_seq_length: 4096
 batch_size: 1
-grad_accum: 8
-learning_rate: 2e-4
-num_epochs: 1
+grad_accum: 16
+learning_rate: 1e-5
+num_epochs: 2
+warmup_ratio: 0.1
+early_stopping_patience: 3
 use_4bit: false  # GB10 has 128GB unified memory — bf16 fits; set true only if OOM

@@ -8,6 +8,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
+    EarlyStoppingCallback,
 )
 from trl import SFTConfig, SFTTrainer
 
@@ -49,6 +50,9 @@ def main():
     ap.add_argument("--lora-r", type=int, default=32)
     ap.add_argument("--lora-alpha", type=int, default=64)
     ap.add_argument("--lora-dropout", type=float, default=0.05)
+    ap.add_argument("--warmup-ratio", type=float, default=0.03)
+    ap.add_argument("--early-stopping-patience", type=int, default=0,
+                    help="EarlyStoppingCallback patience (epochs). 0 = disabled.")
     ap.add_argument("--use-4bit", action="store_true")
     args = ap.parse_args()
 
@@ -88,7 +92,7 @@ def main():
         lora_dropout=args.lora_dropout,
         bias="none",
         task_type="CAUSAL_LM",
-        target_modules="all-linear",
+        target_modules=r".*\.(in_proj|out_proj|up_proj|down_proj)$",
     )
     model = get_peft_model(model, peft_config, autocast_adapter_dtype=False)
 
@@ -101,6 +105,8 @@ def main():
     if "validation" in ds:
         ds["validation"] = ds["validation"].map(lambda x: format_example(x, tokenizer), remove_columns=ds["validation"].column_names)
 
+    use_early_stopping = args.early_stopping_patience > 0 and args.valid_file
+
     train_args = SFTConfig(
         output_dir=args.output_dir,
         per_device_train_batch_size=args.batch_size,
@@ -111,14 +117,23 @@ def main():
         logging_steps=10,
         save_strategy="epoch",
         eval_strategy="epoch" if args.valid_file else "no",
+        load_best_model_at_end=use_early_stopping,
+        metric_for_best_model="eval_loss" if use_early_stopping else None,
+        greater_is_better=False if use_early_stopping else None,
         bf16=True,
         report_to="none",
-        warmup_ratio=0.03,
+        warmup_ratio=args.warmup_ratio,
         lr_scheduler_type="cosine",
         max_grad_norm=1.0,
         max_seq_length=args.max_seq_length,
         gradient_checkpointing=False,
     )
+
+    callbacks = []
+    if use_early_stopping:
+        callbacks.append(EarlyStoppingCallback(
+            early_stopping_patience=args.early_stopping_patience
+        ))
 
     trainer = SFTTrainer(
         model=model,
@@ -126,6 +141,7 @@ def main():
         train_dataset=ds["train"],
         eval_dataset=ds.get("validation"),
         args=train_args,
+        callbacks=callbacks if callbacks else None,
     )
 
     trainer.train()

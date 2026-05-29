@@ -20,14 +20,27 @@
 - [x] Run `validate_metric.py` — val acc **30.7% (285/929)** (regression vs 43.5% baseline)
 - [x] Update leaderboard — noisy Gemini CoT traces hurt; many degenerate outputs in dataset
 
-## Phase 4 — Next iteration
-- [ ] Decide on v0.3 strategy — options:
-  - Filter CoT dataset to correct-answer-only traces (remove noisy Gemini outputs)
-  - Mix raw competition data (v0.1 approach) with high-quality CoT subset
-  - Return to raw competition data but train for more epochs
-- [ ] Publish best adapter to HF Hub (update `marksusol/nemotron-nano-30b-lora-reasoning`)
-- [ ] Update notebook Section 8 (Results) with final val acc and Kaggle score
-- [ ] Update notebook Section 9 (Reproducibility) with final adapter repo and Docker image tag
+## Phase 4 — v0.3 (correctness-filtered CoT + fixed hyperparameters)
+
+See `docs/plans/v0.3-cot-filtered-plan.md` for full details.
+
+Root causes of v0.2 regression identified:
+- Unfiltered noisy CoT traces (many degenerate Gemini outputs)
+- `lr=2e-4` too high for long CoT targets → gradient spikes (visible in training plot)
+
+Key changes for v0.3:
+- Dataset: `kishanvavdara/nemotron-reasoning-traj` — correctness-filtered (~2,789 samples)
+- `lr=1e-5` (20× lower), 2 epochs, `max_seq_length=4096`
+- Response format: `{cot}\n</think>\n\boxed{answer}` (aligns with Nemotron pre-training)
+- `target_modules`: specific regex `in_proj|out_proj|up_proj|down_proj` not `all-linear`
+
+- [ ] Download `kishanvavdara/nemotron-reasoning-traj`; write `scripts/download_cot_filtered.py`
+- [ ] Update `configs/nemotron.yaml` — lr=1e-5, epochs=2, seq_len=4096, lora_alpha=32
+- [ ] Update `train_lora.py` — target_modules regex + `</think>` response format
+- [ ] Run `RUN_NAME=cot_v3 bash scripts/run_train.sh`
+- [ ] Validate, package, submit; record in leaderboard
+- [ ] Publish best adapter to HF Hub (`marksusol/nemotron-nano-30b-lora-reasoning`)
+- [ ] Update notebook Sections 8 + 9 with final results
 
 ## Kaggle Notebooks
 - [x] Prize eligibility notebook public — `gdataranger/nemotron-3-nano-30b-lora-reasoning-challenge`

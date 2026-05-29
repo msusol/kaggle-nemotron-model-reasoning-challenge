@@ -5,102 +5,148 @@ Nemotron-3-Nano-30B notebooks in this competition.
 
 ---
 
-## 1. nvidia-utility-script must be added as a kernel input
+## 1. nvidia-utility-script must be added as a kernel input (manually)
 
 ### Context
 
-Competition notebooks that use Nemotron-H (the Mamba/attention hybrid architecture)
-need CUTLASS DSL and other NVIDIA-provided utilities. These are distributed via a
-companion notebook maintained by `ryanholbrook`:
+Competition notebooks that use Nemotron-H need CUTLASS DSL, `mamba_ssm`, and
+`causal_conv1d` from a companion notebook maintained by `ryanholbrook`:
 
 - **Notebook:** https://www.kaggle.com/code/ryanholbrook/nvidia-utility-script
 - **Competition discussion:** https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/684244
 
-### Investigation Checklist
-
-- [x] Identified missing kernel input as root cause of `ModuleNotFoundError: No module named 'mamba_ssm'`
-- [x] Confirmed fix: add `ryanholbrook/nvidia-utility-script` to `kernel_sources` in metadata
-- [x] Verified `site.addsitedir(cutlass_pkg_path)` path matches what the utility script provides
-
 ### Findings
 
-When a notebook references the CUTLASS path:
+The utility script makes its packages available under:
 
-```python
-cutlass_pkg_path = (
-    "/kaggle/usr/lib/notebooks/ryanholbrook/"
-    "nvidia-utility-script/nvidia_cutlass_dsl/python_packages/"
-)
-site.addsitedir(cutlass_pkg_path)
+```
+/kaggle/usr/lib/notebooks/ryanholbrook/nvidia-utility-script/
 ```
 
-...this path only exists if `ryanholbrook/nvidia-utility-script` has been added as a
-**kernel input** to the notebook. Without it, the path is silently missing and the
-`mamba_ssm` import fails downstream.
+This path only exists when the script is added as a **kernel input**. Without it,
+`site.addsitedir` silently does nothing and `mamba_ssm` fails to import downstream.
 
-The error chain is:
-1. `site.addsitedir(cutlass_pkg_path)` — silently does nothing (path missing)
-2. `trust_remote_code=True` triggers loading of `modeling_nemotron_h.py` from model repo
-3. `modeling_nemotron_h.py` attempts `from mamba_ssm.ops.triton.layernorm_gated import rmsnorm_fn`
-4. `mamba_ssm` not available → `ImportError: mamba-ssm is required by the Mamba model`
+**`kernel_sources` in metadata JSON does NOT work via API push.** The field is present
+in both `notebook/kernel-metadata.json` and `notebook/submission-demo-kernel-metadata.json`
+and is accepted by `kaggle kernels push` without error — but Kaggle silently ignores it
+and does not mount the utility script's output. This is a Kaggle API limitation, not a
+metadata error.
+
+**The manual add through the Kaggle UI is the only way to make it stick:**
+Kaggle notebook editor → Inputs (right panel) → Add → search
+`ryanholbrook/nvidia-utility-script` → Add. Once added this way, it persists across all
+subsequent `kaggle kernels push` updates to the same kernel ID — you only need to do it
+once per notebook.
 
 ### Actions Taken
 
-1. Added `"ryanholbrook/nvidia-utility-script"` to `kernel_sources` in both metadata files:
-   - `notebook/kernel-metadata.json` (prize eligibility notebook)
-   - `notebook/submission-demo-kernel-metadata.json` (submission demo)
+- Added `"ryanholbrook/nvidia-utility-script"` to `kernel_sources` in both metadata files
+  (has no effect on its own but documents the intent).
+- Added the input **manually via Kaggle UI** to both notebooks — this is the actual fix.
+- Updated `site.addsitedir` to scan **all** `python_packages` subdirs under the utility
+  script root (not just the CUTLASS subdir), so `mamba_ssm` and `causal_conv1d` are also
+  picked up regardless of where they live:
 
-2. Separately fixed `trust_remote_code=True` → removed, with `transformers==5.5.3` pinned.
-   Native NemotronH support in transformers ≥ 5.3.0 avoids the `mamba_ssm` dependency
-   entirely, so the utility script is needed for CUTLASS kernels but no longer a hard
-   requirement just to load the model.
+```python
+utility_root = pathlib.Path(
+    "/kaggle/usr/lib/notebooks/ryanholbrook/nvidia-utility-script"
+)
+if utility_root.exists():
+    for pkg_path in sorted(utility_root.rglob("python_packages")):
+        site.addsitedir(str(pkg_path))
+    site.addsitedir(str(utility_root))
+else:
+    print("WARNING: nvidia-utility-script not found — add it as a kernel input")
+```
 
 ### Resolution
 
-**Status: Resolved**
-
-Both notebooks now declare `ryanholbrook/nvidia-utility-script` as a kernel input via
-`kernel_sources` in their metadata JSON. Pushed as Kaggle kernel versions 5 (prize
-eligibility) and 4 (submission demo), commit `220d85b`.
+**Status: Resolved** — utility script added manually via Kaggle UI; broad path scan
+committed in `dade990`.
 
 ### Follow-ups
 
-- Verify that the CUTLASS path resolves correctly after re-running the notebooks.
-- When pushing notebook updates via `kaggle kernels push`, the `kernel_sources` field
-  in `kernel-metadata.json` must always include `ryanholbrook/nvidia-utility-script` —
-  it will be stripped if the metadata is regenerated without it.
+- Every time a new notebook is created for this competition, the utility script must be
+  added manually via the Kaggle UI — API push alone is not sufficient.
+- The `WARNING` print makes it obvious if the input is missing when the notebook is run.
 
 ---
 
-## 2. trust_remote_code=True breaks model loading on Kaggle (mamba_ssm missing)
+## 2. trust_remote_code=True — required in Kaggle environment
 
 ### Context
 
-The Kaggle T4/P100 environment does not have `mamba_ssm` pre-installed. Any notebook
-that loads Nemotron-3-Nano-30B with `trust_remote_code=True` will fail because the
-model repo's `modeling_nemotron_h.py` unconditionally imports `mamba_ssm`.
+The Kaggle model hub path (`kagglehub.model_download`) loads the model via the repo's
+custom `modeling_nemotron_h.py`, which requires `mamba_ssm`. Dropping
+`trust_remote_code=True` causes transformers to prompt interactively ("Do you wish to
+run the custom code?") which hangs a notebook run.
 
 ### Findings
 
-- `transformers < 5.3.0` + `trust_remote_code=True` → loads `modeling_nemotron_h.py` → fails
-- `transformers >= 5.3.0` + no `trust_remote_code` → uses native NemotronH implementation → works
+Two approaches were attempted:
 
-The native implementation in transformers ≥ 5.3.0 uses Triton kernels directly and
-does not require `mamba_ssm` to be installed separately.
+**Approach A (failed):** Drop `trust_remote_code=True`, pin `transformers==5.5.3` for
+native NemotronH support. This caused a `CalledProcessError` — Kaggle's base environment
+rejects the transformers version pin with pip conflicts, and even when the install
+succeeds the already-loaded `transformers` module in the running kernel is not replaced
+without a restart. Result: the interactive "Do you wish to run the custom code?" prompt
+still appeared.
+
+**Approach B (working):** Keep `trust_remote_code=True` and supply `mamba_ssm` via the
+utility script (Issue 1). This is the path the competition intended.
+
+Note: the GB10 training pipeline correctly drops `trust_remote_code=True` and uses
+`transformers==5.5.3` — this works on GB10 because the Docker image is rebuilt with the
+correct transformers version and there is no conflicting base environment. The Kaggle
+notebook environment is more constrained.
 
 ### Actions Taken
 
-- Pinned `transformers==5.5.3` in the pip install cell of both notebooks.
-- Removed `trust_remote_code=True` from all `AutoModelForCausalLM.from_pretrained()` and
-  `AutoTokenizer.from_pretrained()` calls in both notebooks.
+- Reverted `trust_remote_code=True` into both notebooks (`dade990`).
+- Dropped `transformers==5.5.3` from the pip install cell; only `peft==0.14.0` is
+  installed (other packages are pre-installed in Kaggle's base environment).
+- pip install cell uses `capture_output=True` and prints stderr on failure instead of
+  raising, so a pip issue does not abort the notebook.
 
 ### Resolution
 
-**Status: Resolved** — commit `245c768` (prize eligibility), `508dc18` (submission demo).
+**Status: Resolved** — `trust_remote_code=True` restored, pip cell simplified (`586d7fb`).
 
 ### Follow-ups
 
-- This mirrors the fix already applied to the GB10 training scripts
-  (`train_lora.py`, `infer_lora.py`, `smoke_test_nemotron.py`) in commit `6374cd4`.
-- Any new notebook or script that loads Nemotron-3-Nano-30B should use
-  `transformers >= 5.3.0` without `trust_remote_code=True`.
+- If Kaggle's base environment ever ships `transformers >= 5.3.0`, Approach A becomes
+  viable and would remove the `mamba_ssm` dependency entirely.
+- The pip install cell should continue to use `capture_output=True` rather than
+  `check=True` to avoid aborting on non-critical pip warnings.
+
+---
+
+## 3. pip install of pinned transformers fails in Kaggle environment
+
+### Context
+
+Pinning `transformers==5.5.3` via pip in a Kaggle notebook cell returns exit code 1.
+
+### Findings
+
+Kaggle's base Python environment has pinned packages with interdependencies. Attempting
+to install a specific `transformers` version conflicts with those constraints and pip
+exits non-zero. The `-q` flag suppresses the output, so the error only surfaces as a
+`CalledProcessError` when `check=True` is used.
+
+### Actions Taken
+
+- Removed `transformers==5.5.3` from the pip install cell entirely (see Issue 2).
+- Changed remaining `subprocess.run` call to use `capture_output=True` and print stderr
+  on failure rather than `check=True`.
+
+### Resolution
+
+**Status: Resolved** — `586d7fb`.
+
+### Follow-ups
+
+- General rule for Kaggle notebook pip installs: never use `check=True`; always print
+  stderr on failure so issues are visible without aborting the notebook.
+- Only install packages that are genuinely absent from Kaggle's base environment.
+  Use `importlib.util.find_spec("package_name")` to check before installing if unsure.

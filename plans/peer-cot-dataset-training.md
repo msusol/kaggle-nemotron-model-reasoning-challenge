@@ -10,105 +10,54 @@ reasoning chains to imitate, which should improve over the v0.1-baseline (Kaggle
 
 ---
 
-## Step 1 — Inspect the dataset schema
+## Step 1 — Inspect the dataset schema ✓
 
-Before writing conversion code, discover the exact column names.
+**Completed 2026-05-28.** File: `final_Nemotron_training_data.csv` (13.3 MB, 9,500 rows).
 
-```bash
-docker run --rm \
-  --user "$(id -u):$(id -g)" \
-  -e HOME=/workspace \
-  -e KAGGLE_USERNAME="${KAGGLE_USERNAME}" \
-  -e KAGGLE_API_TOKEN="${KAGGLE_API_TOKEN}" \
-  -v "$(pwd)":/workspace \
-  -w /workspace \
-  nemotron-gb10:latest \
-  python - <<'EOF'
-import kagglehub, pathlib, json, csv
-
-path = kagglehub.dataset_download("kienngx/nemotron-30b-competition-trainingdata-cot-labels")
-print("Downloaded to:", path)
-for f in sorted(pathlib.Path(path).rglob("*")):
-    if f.is_file():
-        print(f"  {f.relative_to(path)}  ({f.stat().st_size:,} bytes)")
-        if f.suffix == ".csv":
-            with open(f, newline="") as fh:
-                cols = next(csv.reader(fh))
-            print(f"    columns: {cols}")
-            with open(f, newline="") as fh:
-                row = next(csv.DictReader(fh))
-            print(f"    first row keys: {list(row.keys())}")
-            for k, v in row.items():
-                print(f"      {k}: {repr(v[:120])}")
-        elif f.suffix == ".jsonl":
-            with open(f) as fh:
-                row = json.loads(fh.readline())
-            print(f"    keys: {list(row.keys())}")
-            for k, v in row.items():
-                print(f"      {k}: {repr(str(v)[:120])}")
-EOF
-```
-
-**Expected columns (likely, based on dataset description):**
+**Actual schema:**
 
 | Column | Role |
 |---|---|
-| `prompt` or `problem` | The competition problem text |
-| `cot` or `reasoning` or `chain_of_thought` | Gemini-generated reasoning trace |
-| `answer` or `label` | Final answer (may or may not include `\boxed{}`) |
+| `id` | Example ID |
+| `prompt` | Competition problem text |
+| `answer` | Raw final answer — **no** `\boxed{}` wrapper |
+| `generated_cot` | Gemini-2.0-flash reasoning trace |
+| `label` | Category label (not used in training) |
 
-**Action:** Update column name constants in `scripts/download_peer_cot.py` (Step 2) to match
-actual column names found here.
+**Key findings:**
+- 9,500 rows total → 8,550 train / 950 valid at 90/10 split
+- `answer` has no `\boxed{}` — added during conversion
+- `generated_cot` char lengths: min=1, median=641, p90=2094, p99=7266, max=29022
+- Rows with `generated_cot` < 20 chars are skipped (failed Gemini generations)
+- Label distribution: textual cipher (1853), unit conversion (1502), bitwise (1489), physics (1477), numerical representation (1461), symbolic/algebraic (1022), UNKNOWN (696)
 
----
-
-## Step 2 — Write conversion script `scripts/download_peer_cot.py`
-
-Create a new script alongside `download_data.py`. Key differences from the original:
-
-- Uses `kagglehub.dataset_download("kienngx/nemotron-30b-competition-trainingdata-cot-labels")`
-  instead of `kagglehub.competition_download(...)`.
-- The `response` field concatenates the CoT trace and the boxed final answer:
-  ```
-  <cot reasoning>\nFinal answer: \boxed{<answer>}
-  ```
-- Same output format (`train.jsonl`, `valid.jsonl`, `valid_labels.jsonl`) so the rest of the
-  pipeline (`train_lora.py`, `validate_metric.py`, `package_submission.sh`) is unchanged.
-
-**Schema mapping to determine during Step 1:**
-
-```
-response = f"{row[COT_COL].strip()}\nFinal answer: \\boxed{{{answer}}}"
-```
-
-Where `COT_COL` is whatever column holds the reasoning trace (e.g. `cot`, `reasoning`,
-`chain_of_thought`) and `answer` is the raw label stripped of any existing `\boxed{}` wrapper to
-avoid double-wrapping.
-
-**Split:** 90/10 train/valid, `random.seed(42)` — same as `download_data.py`.
-
-**Output files** (overwrite `data/` in-place, or use `--out-dir data/cot_v1` to keep separate):
-
-```
-data/
-  train.jsonl          ← {"prompt", "response", "system", "id"}
-  valid.jsonl          ← same, validation split
-  valid_labels.jsonl   ← {"id", "answer"} for validate_metric.py
-```
+**kagglehub credential note:** uses `KAGGLE_KEY` env var (not `KAGGLE_API_TOKEN`);
+`run_download_peer_cot.sh` maps `KAGGLE_API_TOKEN → KAGGLE_KEY` automatically.
 
 ---
 
-## Step 3 — Run the download + conversion
+## Step 2 — Write conversion script `scripts/download_peer_cot.py` ✓
 
-Add a convenience runner `scripts/run_download_peer_cot.sh` mirroring `run_download.sh` but
-calling `download_peer_cot.py`:
+**Completed 2026-05-28.** Script written at `scripts/download_peer_cot.py`.
+
+Key implementation details:
+- `kagglehub.dataset_download("kienngx/nemotron-30b-competition-trainingdata-cot-labels")`
+- Skips rows with `generated_cot` < 20 chars (failed Gemini generations)
+- `response = f"{generated_cot}\nFinal answer: \\boxed{{{answer}}}"`
+- 90/10 train/valid split, `random.seed(42)`
+- Outputs `train.jsonl`, `valid.jsonl`, `valid_labels.jsonl` — same format as `download_data.py`
+
+---
+
+## Step 3 — Run the download + conversion ✓
+
+**Completed 2026-05-28.** Runner written at `scripts/run_download_peer_cot.sh`.
+
+Maps `KAGGLE_API_TOKEN → KAGGLE_KEY` for kagglehub compatibility. Run with:
 
 ```bash
 bash scripts/run_download_peer_cot.sh
 ```
-
-This mounts the workspace into the container, passes Kaggle credentials, and writes converted
-files to `/workspace/data/`.
 
 ---
 
@@ -226,9 +175,9 @@ new row to `plans/leaderboard.md`:
 
 ## Checklist
 
-- [ ] Step 1: Inspect dataset schema — confirm column names for prompt, CoT, answer
-- [ ] Step 2: Write `scripts/download_peer_cot.py` with correct column mapping
-- [ ] Step 3: Write `scripts/run_download_peer_cot.sh` and run it
+- [x] Step 1: Inspect dataset schema — `id`, `prompt`, `answer`, `generated_cot`, `label`; 9,500 rows
+- [x] Step 2: Write `scripts/download_peer_cot.py` with correct column mapping
+- [x] Step 3: Write `scripts/run_download_peer_cot.sh`
 - [ ] Step 4: Sanity-check converted JSONL; check token lengths; adjust `max_seq_length` if needed
 - [ ] Step 5: Run `bash scripts/run_train.sh` — record adapter dir and train/val loss
 - [ ] Step 6: Run inference + `validate_metric.py` — compare val acc vs 43.5% baseline

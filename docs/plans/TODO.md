@@ -16,13 +16,15 @@
 ## Phase 3 — CoT data training (in progress)
 - [x] Download peer CoT dataset (kienngx, Gemini-2.0-flash) — 8,358 train + 929 valid
 - [x] Run v0.2-cot training — 1 epoch, r=32, bf16 — train_loss=1.546, eval_loss=1.305 (~1h55m)
-- [x] Package and submit v0.2-cot — submitted 2026-05-29, Kaggle score **TBD**
-- [ ] Inference running — `bash scripts/run_inference.sh` → `output/predictions_20260528_211916.jsonl`
-- [ ] Run `validate_metric.py` on v0.2-cot predictions to get val accuracy
-- [ ] Update leaderboard with val acc + Kaggle score once known
+- [x] Package and submit v0.2-cot — Kaggle score **0.54** (regression vs 0.57 baseline)
+- [x] Run `validate_metric.py` — val acc **30.7% (285/929)** (regression vs 43.5% baseline)
+- [x] Update leaderboard — noisy Gemini CoT traces hurt; many degenerate outputs in dataset
 
 ## Phase 4 — Next iteration
-- [ ] Review v0.2-cot Kaggle score; decide whether to iterate
+- [ ] Decide on v0.3 strategy — options:
+  - Filter CoT dataset to correct-answer-only traces (remove noisy Gemini outputs)
+  - Mix raw competition data (v0.1 approach) with high-quality CoT subset
+  - Return to raw competition data but train for more epochs
 - [ ] Publish best adapter to HF Hub (update `marksusol/nemotron-nano-30b-lora-reasoning`)
 - [ ] Update notebook Section 8 (Results) with final val acc and Kaggle score
 - [ ] Update notebook Section 9 (Reproducibility) with final adapter repo and Docker image tag

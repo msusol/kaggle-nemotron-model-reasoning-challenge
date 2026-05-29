@@ -227,5 +227,5 @@ See [`docs/plans/leaderboard.md`](docs/plans/leaderboard.md) for the full run hi
 
 | Version | Data | Val Acc | Kaggle Score |
 |---|---|---|---|
-| v0.1-baseline | Competition labels only | 43.5% | 0.57 |
-| v0.2-cot | Peer CoT dataset (Gemini-2.0-flash) | TBD | TBD (pending submission) |
+| v0.1-baseline | Competition labels only | 43.5% (413/950) | 0.57 |
+| v0.2-cot | Peer CoT dataset (Gemini-2.0-flash) | 30.7% (285/929) | 0.54 — regression; noisy CoT traces hurt |

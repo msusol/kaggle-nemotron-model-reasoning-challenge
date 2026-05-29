@@ -26,11 +26,17 @@ def parse_log(path: Path) -> list[dict]:
 def plot(records: list[dict], out_path: Path) -> None:
     import matplotlib.pyplot as plt
 
-    steps = [i * 10 for i in range(1, len(records) + 1)]
-    loss = [r["loss"] for r in records]
-    accuracy = [r.get("mean_token_accuracy") for r in records]
-    grad_norm = [r.get("grad_norm") for r in records]
-    lr = [r.get("learning_rate") for r in records]
+    def to_float(v):
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    steps = [r["step"] if "step" in r else (i + 1) * 10 for i, r in enumerate(records)]
+    loss = [to_float(r["loss"]) for r in records]
+    accuracy = [to_float(r.get("mean_token_accuracy")) for r in records]
+    grad_norm = [to_float(r.get("grad_norm")) for r in records]
+    lr = [to_float(r.get("learning_rate")) for r in records]
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
     fig.suptitle(out_path.stem, fontsize=12)

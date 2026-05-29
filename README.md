@@ -2,11 +2,11 @@
 
 https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge
 
-This README packages a working setup for training a Nemotron LoRA adapter on a GB10-style NVIDIA system using Hugging Face, PEFT, TRL, and DSPy, then exporting a Kaggle-compatible `submission.zip`.[cite:74][cite:1] The Kaggle competition requires a Nemotron LoRA adapter with `adapter_config.json`, and Kaggle examples commonly package LoRA weights plus that config into the final archive.[cite:1][cite:119][cite:121]
+This repo contains the full pipeline for training a Nemotron LoRA adapter on a GB10-style NVIDIA system using Hugging Face, PEFT, TRL, and DSPy, then exporting a Kaggle-compatible `submission.zip`.
 
 ## Goal
 
-The target competition is the **NVIDIA Nemotron Model Reasoning Challenge** on Kaggle.[cite:1] The required submission is a LoRA adapter for **Nemotron-3-Nano-30B** with rank at most 32, evaluated under vLLM with deterministic generation settings and a metric that prefers answers inside `\\boxed{}`.[cite:1]
+The target competition is the **NVIDIA Nemotron Model Reasoning Challenge** on Kaggle. The required submission is a LoRA adapter for **Nemotron-3-Nano-30B** with rank at most 32, evaluated under vLLM with deterministic generation settings and a metric that prefers answers inside `\\boxed{}`.
 
 ## Hardware
 
@@ -228,4 +228,4 @@ See [`docs/plans/leaderboard.md`](docs/plans/leaderboard.md) for the full run hi
 | Version | Data | Val Acc | Kaggle Score |
 |---|---|---|---|
 | v0.1-baseline | Competition labels only | 43.5% | 0.57 |
-| v0.2-cot | Peer CoT dataset (Gemini-2.0-flash) | TBD | TBD |
+| v0.2-cot | Peer CoT dataset (Gemini-2.0-flash) | TBD | TBD (pending submission) |

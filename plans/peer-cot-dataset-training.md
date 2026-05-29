@@ -177,8 +177,8 @@ new row to `plans/leaderboard.md`:
 
 - [x] Step 1: Inspect dataset schema — `id`, `prompt`, `answer`, `generated_cot`, `label`; 9,500 rows
 - [x] Step 2: Write `scripts/download_peer_cot.py` with correct column mapping
-- [x] Step 3: Write `scripts/run_download_peer_cot.sh`
-- [ ] Step 4: Sanity-check converted JSONL; check token lengths; adjust `max_seq_length` if needed
+- [x] Step 3: Write `scripts/run_download_peer_cot.sh`; conversion produced 8,358 train + 929 valid (213 degenerate rows skipped)
+- [x] Step 4: Sanity-check passed; token lengths p50=248, p90=627, p99=1911 — `max_seq_length=2048` unchanged (only 0.9% truncated)
 - [ ] Step 5: Run `bash scripts/run_train.sh` — record adapter dir and train/val loss
 - [ ] Step 6: Run inference + `validate_metric.py` — compare val acc vs 43.5% baseline
 - [ ] Step 7: Package with `package_submission.sh`; submit to Kaggle; record score in leaderboard

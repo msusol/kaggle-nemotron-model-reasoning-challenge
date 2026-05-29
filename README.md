@@ -8,53 +8,70 @@ This README packages a working setup for training a Nemotron LoRA adapter on a G
 
 The target competition is the **NVIDIA Nemotron Model Reasoning Challenge** on Kaggle.[cite:1] The required submission is a LoRA adapter for **Nemotron-3-Nano-30B** with rank at most 32, evaluated under vLLM with deterministic generation settings and a metric that prefers answers inside `\\boxed{}`.[cite:1]
 
+## Hardware
+
+Training runs on a **NVIDIA DGX Spark (GB10)** — 128 GB unified CPU/GPU memory, Blackwell GB10 GPU, aarch64.
+
+![DGX Spark Dashboard — CPU/GPU utilisation during training](docs/images/dgx-spark-dashboard.png)
+
 ## Repository layout
 
 ```text
 .
-├── .env                         # not tracked — HF_TOKEN goes here
+├── .env                         # not tracked — HF_TOKEN, KAGGLE_API_TOKEN go here
 ├── .gitignore
 ├── CLAUDE.md
 ├── TODO.md
 ├── README.md
 ├── Dockerfile.gb10                      # primary build (26.04-py3)
-├── Dockerfile.gb10-26-01                # archived 26.01-py3 baseline
+├── Dockerfile.gb10-26-01                # validated 26.01-py3 baseline (used for training)
 ├── Dockerfile.gb10-25-12                # archived 25.12-py3 baseline
 ├── .clinerules/
-│   ├── 01-global.md
-│   ├── 02-plan-and-todo-sync.md
-│   ├── 03-desync-cleanup.md
-│   ├── 10-commit-description.md
-│   ├── 11-markdown-codeblocks.md
-│   ├── 12-docker-stop-failed.md
-│   └── 13-docker-gpu-gb10.md
 ├── configs/
 │   └── nemotron.yaml                # training hyperparameters
-├── data/
-│   ├── train.jsonl          # 8,550 examples (90% split of competition train.csv)
-│   ├── valid.jsonl          # 950 examples  (10% split)
+├── data/                            # peer CoT dataset (v0.2-cot)
+│   ├── train.jsonl          # 8,358 examples — Gemini-2.0-flash CoT traces + \boxed{} answers
+│   ├── valid.jsonl          # 929 examples
 │   └── valid_labels.jsonl   # {"id","answer"} pairs for validate_metric.py
+├── docs/
+│   ├── images/
+│   │   └── dgx-spark-dashboard.png  # DGX Spark CPU/GPU usage during training
+│   └── investigate/
+│       └── dataset-comparison.md    # raw competition data vs peer CoT dataset analysis
+├── notebook/
+│   ├── kaggle_prize_eligibility_outline.ipynb   # public prize eligibility writeup
+│   ├── kernel-metadata.json                     # push config for prize notebook
+│   ├── nemotron_submission_demo.ipynb           # submission path 2: load adapter → /kaggle/working
+│   ├── submission-demo-kernel-metadata.json     # push config for submission demo
+│   └── scrapbook.ipynb                          # scratch exploration
 ├── plans/
 │   ├── CITATIONS.md
 │   ├── competition-overview.md
-│   ├── dockerfile-gb10-adapation.md
-│   ├── dockerfile-gb10-proposed.md
-│   ├── dockerfile-gb10-review.md
-│   ├── dspy-peft-migration.md
 │   ├── implementation-plan.md
+│   ├── leaderboard.md                   # run history and scores
+│   ├── nemotron_inference_improvement_plan.md
+│   ├── peer-cot-dataset-training.md     # v0.2-cot pipeline plan
+│   ├── pytorch-container-migration-plan.md
 │   ├── submission-checklist.md
-│   └── submission-layout.md
+│   ├── submission-layout.md
+│   └── submission-vscode.md
 └── scripts/
-    ├── build_image.sh               # builds Docker image
-    ├── run_download.sh              # downloads competition data via kagglehub
-    ├── run_smoke_test.sh
-    ├── run_train.sh
+    ├── build_image.sh               # builds Docker image (26.01 used for training)
     ├── load_config.sh               # exports configs/nemotron.yaml as env vars
-    ├── download_data.py             # kagglehub download + train/valid JSONL conversion
+    ├── download_data.py             # competition data download + JSONL conversion
+    ├── download_peer_cot.py         # peer CoT dataset download + JSONL conversion
     ├── smoke_test_nemotron.py
     ├── train_lora.py
-    ├── validate_metric.py
-    └── package_submission.sh
+    ├── infer_lora.py                # run inference with a saved adapter
+    ├── validate_metric.py           # score predictions against labels
+    ├── plot_training.py
+    ├── package_submission.sh        # zip adapter into submission.zip
+    ├── run_download.sh              # runner: competition data
+    ├── run_download_peer_cot.sh     # runner: peer CoT dataset
+    ├── run_smoke_test.sh
+    ├── run_train.sh                 # runner: training (reads configs/nemotron.yaml)
+    ├── run_inference.sh
+    └── run_validate.sh
 ```
 
 ## Commands
@@ -89,20 +106,28 @@ Archived baselines:
 jobs at `MAX_JOBS=8` for `pip install --no-binary` steps and `-j8` for the bitsandbytes cmake
 build (previously `-j$(nproc)` = 72 jobs on Grace, which OOM'd the DGX Spark).
 
-### 2. Competition data
+### 2. Training data
 
-`data/train.jsonl` (8,550 ex), `data/valid.jsonl` (950 ex), and `data/valid_labels.jsonl` are
+`data/train.jsonl` (8,358 ex), `data/valid.jsonl` (929 ex), and `data/valid_labels.jsonl` are
 already committed — a fresh clone is ready to train without re-downloading.
 
-To regenerate from the competition source (e.g. after a dataset update), add `KAGGLE_USERNAME`
-and `KAGGLE_API_TOKEN` to `.env` (or save the token to `~/.kaggle/access_token`) and run:
+The committed data is the **peer CoT dataset** (`kienngx/nemotron-30b-competition-trainingdata-cot-labels`):
+each `response` contains a Gemini-2.0-flash chain-of-thought trace followed by `Final answer: \boxed{...}`.
+See [`docs/investigate/dataset-comparison.md`](docs/investigate/dataset-comparison.md) for a
+side-by-side comparison with the raw competition data.
+
+To regenerate, add `KAGGLE_USERNAME` and `KAGGLE_API_TOKEN` to `.env` and run:
 
 ```bash
+# Peer CoT dataset (current — recommended)
+bash scripts/run_download_peer_cot.sh
+
+# Raw competition labels only (v0.1-baseline source)
 bash scripts/run_download.sh
 ```
 
-The kagglehub cache is stored in `<workspace>/.cache/kagglehub/` (persists across runs).
-Use `--download-only` to inspect the file inventory and CSV column headers without converting.
+**kagglehub credential note:** `run_download_peer_cot.sh` maps `KAGGLE_API_TOKEN → KAGGLE_KEY`
+automatically (kagglehub uses `KAGGLE_KEY`, not `KAGGLE_API_TOKEN`).
 
 ### 3. Run the smoke test
 
@@ -135,36 +160,76 @@ keeping all shards on the GB10's unified GPU memory and preventing `device_map="
 spilling to NVMe (disk offload makes generation take 60+ minutes). Adjust the cap if running
 on a system with less GPU memory.
 
-### 4. First LoRA training run
+### 4. LoRA training run
 
 Edit `configs/nemotron.yaml` to set hyperparameters, then:
 
 ```bash
+# Basic run — outputs timestamped log and adapter dir
 bash scripts/run_train.sh
+
+# Named run — log and adapter dir include RUN_NAME prefix (recommended)
+RUN_NAME=cot_v1 bash scripts/run_train.sh
+# → output/train_cot_v1_YYYYMMDD_HHMMSS.log
+# → output/adapter_cot_v1_YYYYMMDD_HHMMSS/
 ```
 
-### 5. Local metric sanity check
+The script reads all hyperparameters from `configs/nemotron.yaml` via `load_config.sh`.
+
+### 5. Validate
+
+After training, run inference on the validation set and score it:
 
 ```bash
-cat > /workspace/output/preds.jsonl <<'JSONL'
-{"id": 1, "output": "After solving, Final answer: \\boxed{56}"}
-{"id": 2, "output": "The area is 30. Final answer: \\boxed{30}"}
-JSONL
+bash scripts/run_validate.sh
+```
 
-cat > /workspace/output/labels.jsonl <<'JSONL'
-{"id": 1, "answer": "56"}
-{"id": 2, "answer": "30"}
-JSONL
+Or to score a specific predictions file:
 
-python /workspace/scripts/validate_metric.py \
-  --predictions /workspace/output/preds.jsonl \
-  --labels /workspace/output/labels.jsonl
+```bash
+bash scripts/run_validate.sh --predictions output/predictions_cot_v1.jsonl
 ```
 
 ### 6. Package adapter into `submission.zip`
 
 ```bash
-bash /workspace/scripts/package_submission.sh \
-  /workspace/output/adapter \
-  /workspace/output/submission
+bash scripts/package_submission.sh output/adapter_cot_v1_YYYYMMDD_HHMMSS
+# → output/submission/submission.zip
 ```
+
+### 7. Submit to Kaggle
+
+```bash
+source .env && kaggle competitions submit \
+  -c nvidia-nemotron-model-reasoning-challenge \
+  -f output/submission/submission.zip \
+  -m "v0.2-cot"
+```
+
+### Kaggle Notebooks
+
+| Notebook | URL | Purpose |
+|---|---|---|
+| Prize eligibility writeup | [nemotron-3-nano-30b-lora-reasoning-challenge](https://www.kaggle.com/code/gdataranger/nemotron-3-nano-30b-lora-reasoning-challenge) | Public writeup required for prizes |
+| Submission demo | [nemotron-lora-submission-demo](https://www.kaggle.com/code/gdataranger/nemotron-lora-submission-demo) | Loads pre-trained adapter → saves to `/kaggle/working` for submission |
+
+To push notebook updates:
+
+```bash
+# Prize eligibility notebook
+source .env && KAGGLE_KEY="${KAGGLE_API_TOKEN}" kaggle kernels push -p notebook/
+
+# Submission demo
+cp notebook/nemotron_submission_demo.ipynb /tmp/demo-push/
+cp notebook/submission-demo-kernel-metadata.json /tmp/demo-push/kernel-metadata.json
+source .env && KAGGLE_KEY="${KAGGLE_API_TOKEN}" kaggle kernels push -p /tmp/demo-push/
+```
+
+### Leaderboard
+
+See [`plans/leaderboard.md`](plans/leaderboard.md) for the full run history.
+
+| Version | Data | Val Acc | Kaggle Score |
+|---|---|---|---|
+| v0.1-baseline | Competition labels only | 43.5% | 0.57 |
+| v0.2-cot | Peer CoT dataset (Gemini-2.0-flash) | TBD | TBD |

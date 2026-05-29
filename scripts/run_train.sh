@@ -17,8 +17,11 @@ if [[ "${USE_4BIT:-false}" == "true" ]]; then
 fi
 
 RUN_TS="$(date +%Y%m%d_%H%M%S)"
-LOG_FILE="${WORKSPACE}/output/train_${RUN_TS}.log"
-ADAPTER_DIR="${WORKSPACE}/output/adapter_${RUN_TS}"
+RUN_NAME="${RUN_NAME:-}"
+RUN_SUFFIX="${RUN_NAME:+_${RUN_NAME}}_${RUN_TS}"
+LOG_FILE="${WORKSPACE}/output/train${RUN_SUFFIX}.log"
+ADAPTER_DIR="${WORKSPACE}/output/adapter${RUN_SUFFIX}"
+CONTAINER_ADAPTER_DIR="/workspace/output/adapter${RUN_SUFFIX}"
 mkdir -p "${WORKSPACE}/output"
 
 docker run --rm --privileged \
@@ -36,7 +39,7 @@ docker run --rm --privileged \
     --model-id "${BASE_MODEL}" \
     --train-file "${TRAIN_FILE}" \
     --valid-file "${VALID_FILE}" \
-    --output-dir "${ADAPTER_DIR}" \
+    --output-dir "${CONTAINER_ADAPTER_DIR}" \
     --max-seq-length "${MAX_SEQ_LENGTH}" \
     --batch-size "${BATCH_SIZE}" \
     --grad-accum "${GRAD_ACCUM}" \

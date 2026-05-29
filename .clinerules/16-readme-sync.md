@@ -26,6 +26,6 @@ Update `README.md` whenever any of the following change:
 
 ## What not to add
 
-- Do not add step-by-step implementation detail that belongs in `plans/*.md`.
+- Do not add step-by-step implementation detail that belongs in `docs/plans/*.md`.
 - Do not document internal functions or class APIs — README covers usage, not internals.
 - Do not create a new README section for every minor script change; batch related changes into one update.

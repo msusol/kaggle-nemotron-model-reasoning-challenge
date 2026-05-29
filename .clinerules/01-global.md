@@ -1,8 +1,21 @@
-# Global project workflow: plans, TODO.md, and README.md first
+# Global Project Workflow Overview
 
-- In this repository, always check for `plan.md`, `plans/*.md`, and the root `TODO.md` before doing significant work.
-- Treat plan files as the source of implementation intent.
-- Treat `TODO.md` as the central live checklist for work derived from plans.
-- Treat `README.md` as the living reference for repository layout and commands — keep it in sync whenever scripts, data files, or runner scripts are added, removed, or renamed.
-- Keep plan files, `TODO.md`, `README.md`, and implementation changes aligned throughout the task.
-- Combine this rule with the more detailed synchronization behavior defined in the other `.clinerules/` files.
+This document establishes conventions for managing documentation in projects using a hierarchical `docs/` directory structure.
+
+## Key Resolution Process
+
+The workflow prioritizes finding the **nearest** `docs/` root by checking the current directory first, then walking up toward the repository root. "Stop at the first directory that contains `docs/` — that is the **docs root** for this context." If no docs folder exists anywhere, one should be created at the repository root level.
+
+## Canonical Directory Roles
+
+The framework designates specific purposes for subdirectories within the resolved docs root:
+
+- **docs/specs/** - Houses feature and subsystem design documentation
+- **docs/plans/** - Contains implementation plans and task sequencing guidance
+- **docs/roadmap/** - Manages time-based planning and initiative priorities
+- **docs/investigate/** - Stores investigation logs and issue analysis
+- **docs/process/** - Holds reusable workflow and operational procedures
+
+## Primary Purpose
+
+This structure enables independent projects or sub-projects to maintain separate documentation hierarchies without parent-level overrides, treating the resolved `docs/` location as "the canonical home for long-lived project documentation."

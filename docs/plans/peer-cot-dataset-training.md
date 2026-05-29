@@ -165,7 +165,7 @@ bash scripts/package_submission.sh output/adapter_YYYYMMDD_HHMMSS
 ```
 
 Upload `output/submission/submission.zip` to Kaggle. Record the public leaderboard score and add a
-new row to `plans/leaderboard.md`:
+new row to `docs/plans/leaderboard.md`:
 
 | Version | Notes |
 |---|---|

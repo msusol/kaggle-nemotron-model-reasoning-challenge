@@ -21,12 +21,11 @@ Training runs on a **NVIDIA DGX Spark (GB10)** — 128 GB unified CPU/GPU memory
 ├── .env                         # not tracked — HF_TOKEN, KAGGLE_API_TOKEN go here
 ├── .gitignore
 ├── CLAUDE.md
-├── TODO.md
 ├── README.md
 ├── Dockerfile.gb10                      # primary build (26.04-py3)
 ├── Dockerfile.gb10-26-01                # validated 26.01-py3 baseline (used for training)
 ├── Dockerfile.gb10-25-12                # archived 25.12-py3 baseline
-├── .clinerules/
+├── .clinerules/                         # 17 rules (framework 01-12, project-specific 13-17)
 ├── configs/
 │   └── nemotron.yaml                # training hyperparameters
 ├── data/                            # peer CoT dataset (v0.2-cot)
@@ -35,26 +34,23 @@ Training runs on a **NVIDIA DGX Spark (GB10)** — 128 GB unified CPU/GPU memory
 │   └── valid_labels.jsonl   # {"id","answer"} pairs for validate_metric.py
 ├── docs/
 │   ├── images/
-│   │   └── dgx-spark-dashboard.png  # DGX Spark CPU/GPU usage during training
-│   └── investigate/
-│       └── dataset-comparison.md    # raw competition data vs peer CoT dataset analysis
+│   │   └── dgx-spark-dashboard.png      # DGX Spark CPU/GPU usage during training
+│   ├── investigate/
+│   │   └── dataset-comparison.md        # raw competition data vs peer CoT dataset analysis
+│   └── plans/
+│       ├── TODO.md                      # central task checklist
+│       ├── leaderboard.md               # run history and scores
+│       ├── peer-cot-dataset-training.md # v0.2-cot pipeline plan
+│       ├── implementation-plan.md
+│       ├── competition-overview.md
+│       ├── CITATIONS.md
+│       └── ...                          # other plan files
 ├── notebook/
 │   ├── kaggle_prize_eligibility_outline.ipynb   # public prize eligibility writeup
 │   ├── kernel-metadata.json                     # push config for prize notebook
 │   ├── nemotron_submission_demo.ipynb           # submission path 2: load adapter → /kaggle/working
 │   ├── submission-demo-kernel-metadata.json     # push config for submission demo
-│   └── scrapbook.ipynb                          # scratch exploration
-├── plans/
-│   ├── CITATIONS.md
-│   ├── competition-overview.md
-│   ├── implementation-plan.md
-│   ├── leaderboard.md                   # run history and scores
-│   ├── nemotron_inference_improvement_plan.md
-│   ├── peer-cot-dataset-training.md     # v0.2-cot pipeline plan
-│   ├── pytorch-container-migration-plan.md
-│   ├── submission-checklist.md
-│   ├── submission-layout.md
-│   └── submission-vscode.md
+│   └── scrapbook.ipynb
 └── scripts/
     ├── build_image.sh               # builds Docker image (26.01 used for training)
     ├── load_config.sh               # exports configs/nemotron.yaml as env vars
@@ -227,7 +223,7 @@ source .env && KAGGLE_KEY="${KAGGLE_API_TOKEN}" kaggle kernels push -p /tmp/demo
 
 ### Leaderboard
 
-See [`plans/leaderboard.md`](plans/leaderboard.md) for the full run history.
+See [`docs/plans/leaderboard.md`](docs/plans/leaderboard.md) for the full run history.
 
 | Version | Data | Val Acc | Kaggle Score |
 |---|---|---|---|

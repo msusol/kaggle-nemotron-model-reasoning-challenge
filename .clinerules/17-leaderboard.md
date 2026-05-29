@@ -8,7 +8,7 @@ paths:
 
 # Leaderboard synchronization
 
-Update `plans/leaderboard.md` whenever any of the following occur:
+Update `docs/plans/leaderboard.md` whenever any of the following occur:
 
 | Trigger | Action |
 |---|---|

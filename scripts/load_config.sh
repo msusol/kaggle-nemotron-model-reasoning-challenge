@@ -16,6 +16,8 @@ for path in sys.argv[1:]:
         merged.update(yaml.safe_load(f) or {})
 
 for k, v in merged.items():
-    print(f"export {k.upper()}={shlex.quote(str(v))}")
+    # Export booleans as lowercase so bash [[ "$VAR" == "true" ]] comparisons work.
+    val = str(v).lower() if isinstance(v, bool) else str(v)
+    print(f"export {k.upper()}={shlex.quote(val)}")
 PYEOF
 )"

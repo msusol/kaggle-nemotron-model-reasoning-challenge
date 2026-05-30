@@ -83,6 +83,45 @@ If training is still OOM after these settings, the next lever is `max_seq_length
 
 ---
 
+## run_prepare.sh — one-time 4-bit cache
+
+`run_prepare.sh` quantizes the 30B BF16 model to 4-bit NF4 and saves it to `.cache/nemotron_4bit/`. Once the `.ready` sentinel exists, `run_train.sh` loads the 15 GB cache in ~1 min instead of re-doing the 6-min BF16 load every run.
+
+### Why prepare has no memory limit
+
+`run_prepare.sh` intentionally omits `--memory` / `--memory-swap`. Two reasons:
+
+1. **`--ulimit memlock=-1` + a hard memory cap = silent OOM kill.** The ulimit allows CUDA to pin unlimited memory in RAM (no swap fallback). When the cap is hit the cgroup kills the container instantly — no traceback, no `OOMKilled` flag, the progress bar just stops. This is what caused repeated deaths at 72–94%.
+
+2. **Prepare has no training overhead.** No gradients, no optimizer states, no activation buffers. The only spike is during BF16→4-bit conversion. The host has 120 GB free; removing the cap is safe.
+
+### `low_cpu_mem_usage=True` — cuts the BF16 loading peak
+
+Without this flag, `from_pretrained` loads each ~5 GB safetensors shard fully into memory before quantizing — 13 shards means up to ~5 GB of BF16 is held alongside the accumulating 4-bit model.
+
+With `low_cpu_mem_usage=True` the meta-device path is used instead: the model is initialised as an empty shell and weights stream in **one tensor at a time**, so the peak BF16 footprint is a few hundred MB (the largest single tensor) rather than a full shard. This was the fix that allowed 401/401 tensors to load where 94% had been the previous ceiling.
+
+> **Note:** `low_cpu_mem_usage=True` is set in both `prepare_quantized_model.py` and `train_lora.py`. Do not remove it.
+
+### Swap extension — last-resort burst headroom
+
+If the host still OOM-kills prepare (the final few tensors — `lm_head`, last SSM layers — are the largest), extend swap before running:
+
+```bash
+sudo fallocate -l 32G /swapfile2
+sudo chmod 600 /swapfile2
+sudo mkswap /swapfile2
+sudo swapon /swapfile2
+```
+
+This adds ~32 GB of burst headroom for the loading peak. The swap is used only for the transient BF16 spike; once loading completes and the shard is released, the swapped pages are reclaimed. Remove after the cache is built:
+
+```bash
+sudo swapoff /swapfile2 && sudo rm /swapfile2
+```
+
+---
+
 ## Build the image
 
 The primary image is built from `Dockerfile.gb10` (NVIDIA PyTorch 26.04):

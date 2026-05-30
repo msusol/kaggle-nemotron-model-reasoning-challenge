@@ -75,6 +75,7 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
 
     device = {"": 0}  # force all layers onto GPU 0 — no CPU offload on GB10
+    QUANTIZED_CACHE = "/workspace/.cache/nemotron_4bit"
     if args.use_4bit:
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -82,13 +83,17 @@ def main():
             bnb_4bit_use_double_quant=True,
             bnb_4bit_compute_dtype=torch.bfloat16,
         )
+        cached = os.path.exists(os.path.join(QUANTIZED_CACHE, ".ready"))
+        model_path = QUANTIZED_CACHE if cached else args.model_id
+        if cached:
+            print(f"Loading pre-quantized model from {QUANTIZED_CACHE}")
         model = AutoModelForCausalLM.from_pretrained(
-            args.model_id,
+            model_path,
             quantization_config=bnb_config,
             device_map=device,
-            dtype=torch.bfloat16,
+            low_cpu_mem_usage=True,
         )
-        model = prepare_model_for_kbit_training(model)
+        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=False)
     else:
         model = AutoModelForCausalLM.from_pretrained(
             args.model_id,
@@ -145,8 +150,6 @@ def main():
         lr_scheduler_type="cosine",
         max_grad_norm=1.0,
         max_seq_length=args.max_seq_length,
-        gradient_checkpointing=True,
-        gradient_checkpointing_kwargs={"use_reentrant": False},
     )
 
     callbacks = []

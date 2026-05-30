@@ -59,13 +59,13 @@ There is no separate GPU VRAM pool — `nvidia-smi` reports `[N/A]` for `memory.
 
 | Flag | Default | Purpose |
 |---|---|---|
-| `--memory` | `113g` | Hard container ceiling; leaves ~8 GB for the host OS |
-| `--memory-swap` | `128g` | Combined memory+swap ceiling; allows ~15 GB swap spill before hard kill |
+| `--memory` | `120g` | Hard container ceiling; leaves ~1 GB for the host OS kernel/driver |
+| `--memory-swap` | `128g` | Combined memory+swap ceiling; allows ~8 GB swap spill before hard kill |
 
 Both are overridable via environment variables:
 
 ```bash
-DOCKER_MEMORY_LIMIT=100g DOCKER_MEMORY_SWAP=115g RUN_NAME=experiment bash scripts/run_train.sh
+DOCKER_MEMORY_LIMIT=120g DOCKER_MEMORY_SWAP=128g RUN_NAME=experiment bash scripts/run_train.sh
 ```
 
 ### PyTorch allocator tuning

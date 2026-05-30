@@ -1,5 +1,7 @@
 import argparse
+import math
 import os
+import warnings
 
 import torch
 from datasets import load_dataset
@@ -59,6 +61,15 @@ def main():
     if args.lora_r > 32:
         raise ValueError("Competition constraint violated: --lora-r must be <= 32")
 
+    # Suppress FutureWarning from transformers NemotronH causal-mask internals
+    # (input_embeds → inputs_embeds rename; fires every forward pass, not our code).
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*input_embeds.*deprecated.*",
+        category=FutureWarning,
+        module=r"transformers\.models\.nemotron_h\..*",
+    )
+
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -84,6 +95,10 @@ def main():
             device_map=device,
             dtype=torch.bfloat16,
         )
+    # Sync model config token IDs from tokenizer to avoid SFTTrainer alignment warning.
+    model.config.pad_token_id = tokenizer.pad_token_id
+    model.config.eos_token_id = tokenizer.eos_token_id
+    model.config.bos_token_id = tokenizer.bos_token_id
     model.config.use_cache = False
 
     peft_config = LoraConfig(
@@ -107,6 +122,10 @@ def main():
 
     use_early_stopping = args.early_stopping_patience > 0 and args.valid_file
 
+    steps_per_epoch = math.ceil(len(ds["train"]) / (args.batch_size * args.grad_accum))
+    total_steps = math.ceil(steps_per_epoch * args.num_epochs)
+    warmup_steps = max(1, int(args.warmup_ratio * total_steps))
+
     train_args = SFTConfig(
         output_dir=args.output_dir,
         per_device_train_batch_size=args.batch_size,
@@ -122,7 +141,7 @@ def main():
         greater_is_better=False if use_early_stopping else None,
         bf16=True,
         report_to="none",
-        warmup_ratio=args.warmup_ratio,
+        warmup_steps=warmup_steps,
         lr_scheduler_type="cosine",
         max_grad_norm=1.0,
         max_seq_length=args.max_seq_length,

@@ -1,4 +1,5 @@
 # vLLM serving image for GB10 / DGX Spark (aarch64 + Blackwell sm_120).
+# NVIDIA PyTorch 26.04 — CUDA 13.2.1, PyTorch 2.12 (matches Dockerfile.gb10 training base).
 #
 # Purpose: serve an OpenAI-compatible API for synthetic CoT generation.
 # Recommended model: deepseek-ai/DeepSeek-R1-Distill-Qwen-32B (~65 GB BF16)
@@ -9,7 +10,7 @@
 # Run (see scripts/run_vllm.sh):
 #   bash scripts/run_vllm.sh --model deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
 
-FROM --platform=linux/arm64 nvcr.io/nvidia/pytorch:26.01-py3
+FROM --platform=linux/arm64 nvcr.io/nvidia/pytorch:26.04-py3
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -27,6 +28,9 @@ RUN python3 -c "import torch, sys; \
     v = subprocess.run(['nvcc','--version'], capture_output=True, text=True).stdout.strip().splitlines()[-1]; \
     print('CUDA toolkit:', v)"
 
+RUN echo '=== /etc/pip/constraint.txt ===' \
+ && cat /etc/pip/constraint.txt || echo '(not present)'
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git git-lfs wget curl \
  && rm -rf /var/lib/apt/lists/*
@@ -34,7 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m pip install --upgrade pip setuptools wheel packaging
 
 # vLLM: Blackwell (sm_120) support added in 0.8.x.
-# Installing against the NGC torch (nv26.01 / PyTorch 2.9+); if vLLM's prebuilt
+# Installing against the NGC torch (nv26.04 / PyTorch 2.12); if vLLM's prebuilt
 # wheel conflicts with the NGC ABI, build from source:
 #   pip install vllm --no-binary vllm
 RUN TORCH_CUDA_ARCH_LIST="8.0;8.6;8.7;8.9;9.0;12.0;12.1+PTX" \

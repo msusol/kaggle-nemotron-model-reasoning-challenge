@@ -95,7 +95,7 @@ def main():
             model_path,
             quantization_config=bnb_config,
             device_map=device,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
         )
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=False)
     else:

@@ -29,7 +29,7 @@ def main():
         MODEL_ID,
         quantization_config=bnb_config,
         device_map={"": 0},
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
     )
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 

@@ -29,8 +29,11 @@ docker run --rm --privileged \
   --ipc=host \
   --ulimit memlock=-1 \
   --ulimit stack=67108864 \
+  --memory "${DOCKER_MEMORY_LIMIT:-113g}" \
+  --memory-swap "${DOCKER_MEMORY_SWAP:-128g}" \
   --user "$(id -u):$(id -g)" \
   -e HF_TOKEN="${HF_TOKEN:?HF_TOKEN is not set}" \
+  -e PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512" \
   -v "${WORKSPACE}":/workspace \
   -v "${WORKSPACE}/.cache/triton":/home/ubuntu/.triton \
   -w /workspace \

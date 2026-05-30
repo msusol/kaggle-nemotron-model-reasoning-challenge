@@ -30,6 +30,7 @@ def main():
         quantization_config=bnb_config,
         device_map={"": 0},
         dtype=torch.bfloat16,
+        low_cpu_mem_usage=True,
     )
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 

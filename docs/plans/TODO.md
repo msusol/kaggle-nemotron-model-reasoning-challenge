@@ -80,7 +80,7 @@ Sequencing options (see plan for detail):
 - Option 2 (parallel): run v0.5 from v0.3 concurrently with v0.4; take best Kaggle score
 - Option 3 (fast): skip v0.4, go straight from v0.3 if deadline is tight
 
-- [ ] Add `mergekit` to `Dockerfile.gb10-26-01`; rebuild `nemotron-gb10:latest`
+- [ ] Add `mergekit` to `Dockerfile.gb10`; rebuild `nemotron-gb10:latest`
 - [ ] Confirm `from trl import GRPOTrainer` works in rebuilt image
 - [ ] Write `scripts/train_grpo.py` with reward function + GRPOConfig
 - [ ] Write `configs/nemotron_grpo.yaml`
@@ -91,7 +91,7 @@ Sequencing options (see plan for detail):
 - [ ] Confirm v0.4 dataset published (Rule 6 lineage) before any v0.5 submission
 
 ## Infrastructure (complete)
-- [x] `Dockerfile.gb10-26-01` — validated, used for all training runs
+- [x] `Dockerfile.gb10` (26.04) — current primary image for all training runs
 - [x] `transformers==5.5.3` — native NemotronH KV cache fix, no `trust_remote_code`
 - [x] `gradient_checkpointing=False` — NemotronH doesn't declare support
 - [x] `RUN_NAME` support in `run_train.sh` — named log + adapter dirs

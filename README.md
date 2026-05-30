@@ -65,8 +65,6 @@ See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full 
 ├── CLAUDE.md
 ├── README.md
 ├── Dockerfile.gb10                      # primary build (26.04-py3)
-├── Dockerfile.gb10-26-01                # validated 26.01-py3 baseline (used for training)
-├── Dockerfile.gb10-25-12                # archived 25.12-py3 baseline
 ├── Dockerfile.vllm-gb10                 # vLLM serving image — CoT generation + GRPO inference
 ├── .clinerules/                         # 17 rules (framework 01-12, project-specific 13-17)
 ├── configs/
@@ -103,7 +101,7 @@ See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full 
 │   ├── submission-demo-kernel-metadata.json     # push config for submission demo
 │   └── scrapbook.ipynb
 └── scripts/
-    ├── build_image.sh               # builds Docker image (26.01 used for training)
+    ├── build_image.sh               # builds Docker image (26.04 primary)
     ├── load_config.sh               # exports configs/nemotron.yaml as env vars
     ├── download_data.py             # competition data download + JSONL conversion
     ├── download_peer_cot.py         # peer CoT dataset download + JSONL conversion

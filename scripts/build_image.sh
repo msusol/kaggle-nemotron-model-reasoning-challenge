@@ -9,28 +9,17 @@
 # which uses Mamba-2 Triton kernels exclusively and never calls the legacy CUDA path.
 #
 # Usage:
-#   bash scripts/build_image.sh                    # build primary image (Dockerfile.gb10, 26.04)
-#   bash scripts/build_image.sh 26-01              # build archived 26.01 image (Dockerfile.gb10-26-01)
-#   bash scripts/build_image.sh 25-12              # build archived 25.12 image (Dockerfile.gb10-25-12)
-#   bash scripts/build_image.sh <variant> --fresh  # force-recompile mamba/causal-conv1d
+#   bash scripts/build_image.sh          # build primary image (Dockerfile.gb10, 26.04)
+#   bash scripts/build_image.sh --fresh  # force-recompile mamba/causal-conv1d
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="$(dirname "$SCRIPT_DIR")"
 
-VARIANT="${1:-}"
-FRESH="${2:-}"
+FRESH="${1:-}"
 
-if [[ "$VARIANT" == "25-12" ]]; then
-    DOCKERFILE="Dockerfile.gb10-25-12"
-    IMAGE="nemotron-gb10-25-12:latest"
-elif [[ "$VARIANT" == "26-01" ]]; then
-    DOCKERFILE="Dockerfile.gb10-26-01"
-    IMAGE="nemotron-gb10-26-01:latest"
-else
-    DOCKERFILE="Dockerfile.gb10"
-    IMAGE="nemotron-gb10:latest"
-fi
+DOCKERFILE="Dockerfile.gb10"
+IMAGE="nemotron-gb10:latest"
 
 MAMBA_ARG=""
 if [[ "$FRESH" == "--fresh" ]]; then

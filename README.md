@@ -52,7 +52,7 @@ Key GRPO requirements already satisfied by our stack:
 - `transformers==5.5.3` native Nemotron-H implementation fixes the KV cache name mismatch
   (`past_key_values` vs `cache_params`) that causes 20× slowdown without the fix [cite:145]
 - No `trust_remote_code=True` — uses the fixed built-in implementation
-- `gradient_checkpointing=False` — NemotronH doesn't declare support
+- `gradient_checkpointing=True, use_reentrant=False` — PyTorch generic checkpointing; works without native NemotronH declaration
 
 See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full plan.
 

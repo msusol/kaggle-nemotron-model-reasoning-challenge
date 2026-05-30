@@ -145,7 +145,8 @@ def main():
         lr_scheduler_type="cosine",
         max_grad_norm=1.0,
         max_seq_length=args.max_seq_length,
-        gradient_checkpointing=False,
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
     )
 
     callbacks = []

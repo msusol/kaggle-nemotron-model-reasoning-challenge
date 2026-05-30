@@ -93,7 +93,7 @@ Sequencing options (see plan for detail):
 ## Infrastructure (complete)
 - [x] `Dockerfile.gb10` (26.04) — current primary image for all training runs
 - [x] `transformers==5.5.3` — native NemotronH KV cache fix, no `trust_remote_code`
-- [x] `gradient_checkpointing=False` — NemotronH doesn't declare support
+- [x] `gradient_checkpointing=True, use_reentrant=False` — PyTorch generic checkpointing; reduces activation memory without native NemotronH declaration
 - [x] `RUN_NAME` support in `run_train.sh` — named log + adapter dirs
 - [x] `scripts/download_peer_cot.py` + `run_download_peer_cot.sh`
 - [x] HF Hub adapter published — `marksusol/nemotron-nano-30b-lora-reasoning` (v0.1-baseline placeholder)

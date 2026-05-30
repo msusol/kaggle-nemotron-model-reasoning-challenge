@@ -14,4 +14,4 @@ learning_rate: 2e-4        # matches validated huikang config (StepLinearDecayLR
 num_epochs: 1              # one pass through corpus matches 0.85 notebook pattern
 warmup_ratio: 0.05         # shorter warmup; corpus is clean, less stabilisation needed
 early_stopping_patience: 3
-use_4bit: false            # GB10 121GB unified memory — bf16 fits at seq=8192
+use_4bit: true             # 4-bit cuts model memory ~60GB→15GB; frees HBM to reduce CPU spill

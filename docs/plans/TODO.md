@@ -50,6 +50,46 @@ Key changes for v0.3:
 - [ ] Fill in Section 8 Results once v0.2-cot Kaggle score known
 - [ ] Confirm both notebooks show under competition Code tab
 
+## Phase 5 — v0.4 (huikang corpus SFT)
+
+See `docs/plans/v0.4-blended-plan.md` for full details.
+
+v0.4a/b (synthetic CoT generation) superseded by `samvalladares/huikang-nemotron-artifacts`:
+- 15,979 problems (training + test set), exhaustive algorithmic CoT (~3,292 tok median)
+- Achieves 0.85 in reference notebook — already downloaded at `.cache/huikang-artifacts/`
+
+Key changes vs v0.3: `max_seq_length=8192`, expanded `target_modules` (+ q/k/v/o/lm_head),
+`num_epochs=1`, data from huikang corpus. Config updated in `nemotron.yaml` + `train_lora.py`.
+
+- [ ] Write `scripts/extract_huikang_corpus.py` — decode pre-tokenized corpus → JSONL
+- [ ] Run extraction → `data/v0.4_train.jsonl` + `data/v0.4_valid.jsonl`; verify type distribution
+- [ ] Run `RUN_NAME=huikang_v4 bash scripts/run_train.sh`
+- [ ] Validate, package, submit; record in leaderboard
+- [ ] Link `samvalladares/huikang-nemotron-artifacts` from prize eligibility notebook (Rule 6)
+
+## Phase 6 — v0.5 (GRPO self-improvement)
+
+See `docs/plans/v0.5-grpo-plan.md` for full details.
+
+GRPO lets the model generate its own reasoning and rewards correctness against ground truth —
+no external CoT needed. Requires only competition problems + answers (9,500 examples we already have).
+TRL 0.15.2 has `GRPOTrainer` but needs `mergekit` installed.
+
+Sequencing options (see plan for detail):
+- Option 1 (preferred): init from best v0.4 adapter — warm start on all 6 types
+- Option 2 (parallel): run v0.5 from v0.3 concurrently with v0.4; take best Kaggle score
+- Option 3 (fast): skip v0.4, go straight from v0.3 if deadline is tight
+
+- [ ] Add `mergekit` to `Dockerfile.gb10-26-01`; rebuild `nemotron-gb10:latest`
+- [ ] Confirm `from trl import GRPOTrainer` works in rebuilt image
+- [ ] Write `scripts/train_grpo.py` with reward function + GRPOConfig
+- [ ] Write `configs/nemotron_grpo.yaml`
+- [ ] Write `scripts/run_grpo.sh`
+- [ ] Test run: 50 steps on 100 problems — verify reward signal is non-zero
+- [ ] Full run: `RUN_NAME=grpo_v5 bash scripts/run_grpo.sh`
+- [ ] Validate, package, submit; record in leaderboard
+- [ ] Confirm v0.4 dataset published (Rule 6 lineage) before any v0.5 submission
+
 ## Infrastructure (complete)
 - [x] `Dockerfile.gb10-26-01` — validated, used for all training runs
 - [x] `transformers==5.5.3` — native NemotronH KV cache fix, no `trust_remote_code`

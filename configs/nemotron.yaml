@@ -1,15 +1,17 @@
 base_model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
-train_file: data/train.jsonl
-valid_file: data/valid.jsonl
+train_file: data/v0.4_train.jsonl
+valid_file: data/v0.4_valid.jsonl
 output_dir: output/adapter
-lora_r: 32
+lora_r: 32                 # competition max; do not increase
 lora_alpha: 32
 lora_dropout: 0.05
-max_seq_length: 4096
+# target_modules expanded to match 0.85 notebook (q/k/v/o attention + Mamba + lm_head)
+# updated in train_lora.py LoraConfig
+max_seq_length: 8192       # huikang corpus max=7999; 8192 captures 100% with no truncation
 batch_size: 1
-grad_accum: 16
-learning_rate: 1e-5
-num_epochs: 2
-warmup_ratio: 0.1
+grad_accum: 16             # effective batch=16; increase to 32 if memory allows at seq=8192
+learning_rate: 2e-4        # matches validated huikang config (StepLinearDecayLRSchedule 2e-4→0)
+num_epochs: 1              # one pass through corpus matches 0.85 notebook pattern
+warmup_ratio: 0.05         # shorter warmup; corpus is clean, less stabilisation needed
 early_stopping_patience: 3
-use_4bit: false  # GB10 has 128GB unified memory — bf16 fits; set true only if OOM
+use_4bit: false            # GB10 121GB unified memory — bf16 fits at seq=8192

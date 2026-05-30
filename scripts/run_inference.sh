@@ -2,7 +2,7 @@
 # Run infer_lora.py inside the nemotron-gb10 container.
 #
 # Usage:
-#   bash scripts/run_inference.sh                        # valid.jsonl → output/predictions.jsonl
+#   bash scripts/run_inference.sh                        # v0.3_valid.jsonl → output/predictions.jsonl
 #   bash scripts/run_inference.sh --batch-size 4         # pass extra args to infer_lora.py
 set -euo pipefail
 
@@ -44,6 +44,6 @@ docker run --rm --privileged \
   nemotron-gb10:latest \
   python scripts/infer_lora.py \
     --adapter-dir "/workspace/output/$(basename "${ADAPTER_DIR}")" \
-    --data-file   /workspace/data/valid.jsonl \
+    --data-file   /workspace/data/v0.3_valid.jsonl \
     --output-file "/workspace/output/predictions_$(basename "${ADAPTER_DIR}" | sed 's/adapter_//')".jsonl \
     "${PASSTHROUGH[@]}"

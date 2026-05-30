@@ -43,6 +43,8 @@ This file maps the inline `[cite:N]` references used across the generated Markdo
 - `[cite:143]` Deploying NVIDIA Nemotron-3-Nano with vLLM – NeMo GitHub cookbook — <https://github.com/NVIDIA-NeMo/Nemotron/blob/main/usage-cookbook/Nemotron-3-Nano/vllm_cookbook.ipynb>[cite:143]
 - `[cite:144]` NemotronH – Hugging Face Transformers Documentation — <https://huggingface.co/docs/transformers/model_doc/nemotron_h>[cite:144]
 
+- `[cite:145]` Why GRPO is Painfully Slow on Nemotron (and the Fix) – Kaggle competition discussion #690161 — KV cache name mismatch (`past_key_values` vs `cache_params`) causes 20× slowdown in GRPO; fix: transformers >= 5.3.0 + no `trust_remote_code=True` + `gradient_checkpointing=False` — <https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/690161>
+
 ## Usage note
 
 If the generated Markdown files are moved into a normal Git repository, this file can serve as the human-readable reference list for the inline citation tags used throughout the notes and README.[cite:1][cite:89]

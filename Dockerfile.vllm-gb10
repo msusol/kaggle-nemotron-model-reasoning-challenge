@@ -1,0 +1,59 @@
+# vLLM serving image for GB10 / DGX Spark (aarch64 + Blackwell sm_120).
+#
+# Purpose: serve an OpenAI-compatible API for synthetic CoT generation.
+# Recommended model: deepseek-ai/DeepSeek-R1-Distill-Qwen-32B (~65 GB BF16)
+#
+# Build (on the GB10 — do NOT import an x86_64 image):
+#   docker build --platform linux/arm64 -t nemotron-vllm-gb10:latest -f Dockerfile.vllm-gb10 .
+#
+# Run (see scripts/run_vllm.sh):
+#   bash scripts/run_vllm.sh --model deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
+
+FROM --platform=linux/arm64 nvcr.io/nvidia/pytorch:26.01-py3
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/workspace/.cache/huggingface \
+    HUGGINGFACE_HUB_CACHE=/workspace/.cache/huggingface \
+    TOKENIZERS_PARALLELISM=false
+
+WORKDIR /workspace
+
+RUN python3 -c "import torch, sys; \
+    print('Python:', sys.version); \
+    print('PyTorch:', torch.__version__); \
+    import subprocess; \
+    v = subprocess.run(['nvcc','--version'], capture_output=True, text=True).stdout.strip().splitlines()[-1]; \
+    print('CUDA toolkit:', v)"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git git-lfs wget curl \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --upgrade pip setuptools wheel packaging
+
+# vLLM: Blackwell (sm_120) support added in 0.8.x.
+# Installing against the NGC torch (nv26.01 / PyTorch 2.9+); if vLLM's prebuilt
+# wheel conflicts with the NGC ABI, build from source:
+#   pip install vllm --no-binary vllm
+RUN TORCH_CUDA_ARCH_LIST="8.0;8.6;8.7;8.9;9.0;12.0;12.1+PTX" \
+    pip install vllm
+
+RUN pip install \
+    "huggingface_hub>=1.5.0,<2.0" \
+    "openai>=1.0.0" \
+    "kagglehub" \
+    "tqdm" \
+    "safetensors"
+
+RUN mkdir -p \
+    /workspace/data \
+    /workspace/scripts \
+    /workspace/output \
+    /workspace/.cache/huggingface
+
+COPY scripts /workspace/scripts
+
+# Entrypoint: override with docker run args or use run_vllm.sh.
+CMD ["python", "-m", "vllm.entrypoints.openai.api_server", "--help"]

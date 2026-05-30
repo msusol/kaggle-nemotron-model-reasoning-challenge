@@ -92,7 +92,7 @@ def main():
         lora_dropout=args.lora_dropout,
         bias="none",
         task_type="CAUSAL_LM",
-        target_modules=r".*\.(in_proj|out_proj|up_proj|down_proj)$",
+        target_modules=r".*\.(q_proj|k_proj|v_proj|o_proj|in_proj|out_proj|up_proj|down_proj|lm_head)$",
     )
     model = get_peft_model(model, peft_config, autocast_adapter_dtype=False)
 

@@ -7,7 +7,7 @@ Output JSONL: {"id": ..., "output": <full model generation>}
 Usage:
   python scripts/infer_lora.py \
     --adapter-dir /workspace/output/adapter \
-    --data-file   /workspace/data/valid.jsonl \
+    --data-file   /workspace/data/v0.3_valid.jsonl \
     --output-file /workspace/output/predictions.jsonl
 """
 import argparse

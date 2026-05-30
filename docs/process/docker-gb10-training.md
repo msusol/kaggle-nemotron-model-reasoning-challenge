@@ -106,6 +106,25 @@ bash scripts/build_image.sh <variant> --fresh  # force-recompile mamba/causal-co
 
 ---
 
+## Pause and resume other services
+
+Long training runs (~10 hours) benefit from stopping unrelated containers first to eliminate any
+background CPU/IO competition and leave a clean memory baseline.
+
+```bash
+bash scripts/services.sh pause    # stop all non-training containers; save names to .paused_containers
+RUN_NAME=huikang_v4 bash scripts/run_train.sh
+bash scripts/services.sh resume   # restart every container that was running before the pause
+```
+
+`pause` snapshots whatever containers are running at that moment (excluding any `nemotron-gb10`
+training container) and stops them. `resume` reads that snapshot and starts each one back up,
+then deletes the state file. Both commands are no-ops if there is nothing to act on.
+
+The state file `.paused_containers` is gitignored.
+
+---
+
 ## Launch a training run
 
 ```bash

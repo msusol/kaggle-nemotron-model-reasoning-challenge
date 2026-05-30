@@ -123,7 +123,8 @@ See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full 
     ├── run_train.sh                 # runner: training (reads configs/nemotron.yaml)
     ├── run_inference.sh
     ├── run_validate.sh
-    └── run_vllm.sh                  # start vLLM OpenAI-compatible server (nemotron-vllm-gb10)
+    ├── run_vllm.sh                  # start vLLM OpenAI-compatible server (nemotron-vllm-gb10)
+    └── services.sh                  # pause/resume non-training containers around a training run
 ```
 
 ## Commands
@@ -222,13 +223,16 @@ on a system with less GPU memory.
 Edit `configs/nemotron.yaml` to set hyperparameters, then:
 
 ```bash
-# Basic run — outputs timestamped log and adapter dir
-bash scripts/run_train.sh
+# Recommended: pause other services first to free CPU/IO for the ~10-hour run
+bash scripts/services.sh pause
 
-# Named run — log and adapter dir include RUN_NAME prefix (recommended)
+# Named run — log and adapter dir include RUN_NAME prefix
 RUN_NAME=cot_v1 bash scripts/run_train.sh
 # → output/train_cot_v1_YYYYMMDD_HHMMSS.log
 # → output/adapter_cot_v1_YYYYMMDD_HHMMSS/
+
+# Restore paused services after training completes
+bash scripts/services.sh resume
 ```
 
 The script reads all hyperparameters from `configs/nemotron.yaml` via `load_config.sh`.

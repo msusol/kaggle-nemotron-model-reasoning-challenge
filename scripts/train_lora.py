@@ -24,6 +24,10 @@ def format_example(example, tokenizer):
     )
     user = example["prompt"]
     answer = example["response"]
+    # Corpus extraction strips the <think> prefix (it was in the masked/no-loss region).
+    # Re-add it so the assistant turn matches Nemotron's pre-training format.
+    if not answer.startswith("<think>"):
+        answer = "<think>\n" + answer
 
     messages = [
         {"role": "system", "content": system},
@@ -150,6 +154,9 @@ def main():
         lr_scheduler_type="cosine",
         max_grad_norm=1.0,
         max_seq_length=args.max_seq_length,
+        # NemotronH does not support gradient_checkpointing_enable(); disable it here
+        # so TRL's SFTTrainer doesn't call that method. Memory is managed via 4-bit quant.
+        gradient_checkpointing=False,
     )
 
     callbacks = []

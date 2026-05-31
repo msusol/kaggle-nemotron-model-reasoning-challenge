@@ -91,22 +91,53 @@ If training is still OOM after these settings, the next lever is `max_seq_length
 
 **Do not re-enable until** `prepare_quantized_model.py` is fixed to quantize expert layers explicitly. See `docs/investigate/` for analysis.
 
-### Why the model dies at ~76–98% of weight loading
+### Memory architecture — two separate pools
 
-During BF16 loading, two allocations grow simultaneously and compete for the same 121 GB pool:
+The GB10 has **two distinct memory pools** confirmed via `torch.cuda.mem_get_info()`:
 
-| Allocation | Source | Size at 100% load |
+| Pool | Size | What lives here |
 |---|---|---|
-| GPU (unified memory) | tensors placed on device as each is loaded | ~57 GB |
-| Kernel page cache | safetensors `mmap` pages from the 13 HF shards | up to ~57 GB |
+| Linux RAM (LPDDR5x) | ~121 GB visible to OS | page cache, Python heap, Docker overlays |
+| GPU HBM (Blackwell) | ~130.7 GB visible to CUDA | model tensors, CUDA contexts, activations |
 
-Both are backed by physical RAM on the GB10 unified-memory architecture. The GPU allocation is **pinned** (cannot be swapped or evicted). The mmap pages are evictable, but the kernel does not evict them fast enough when the demand curve is smooth — it prefers to serve pages from cache rather than evict clean pages proactively.
+These are **separate physical memories** linked by NVLink-C2C. Loading 57 GB to GPU draws from the HBM pool and does **not** reduce Linux RAM. The mmap page cache from safetensors shards goes into Linux RAM and does **not** reduce GPU memory. They do not directly compete.
 
-**At ~98% loaded (~56 GB on GPU) the combined pressure approaches 113 GB**, which leaves only ~8 GB for the OS, desktop, and driver. If anything else competes for that headroom — accumulated swap from prior crashed runs, CUDA driver workspace, a background process paging in — the OOM killer fires with no Python traceback.
+This corrects an earlier assumption (documented before `torch.cuda.mem_get_info()` was run) that both pools shared the same 121 GB unified DRAM. The Linux `free -h` total (~121 GB) reflects only the CPU-side LPDDR5x; CUDA's 130.7 GB is the Blackwell HBM.
 
-**This is NOT about the last shard being an extra or optional.** All 13 shards / 401 tensors are required. The death near the end of loading is purely a memory arithmetic problem: GPU + mmap page cache ≈ 2× model size, and 2 × 57 GB = 114 GB sits right at the 121 GB ceiling.
+### Why the model dies at ~70–98% of weight loading
 
-The failure point varies (73%, 76%, 98%) depending on prior system state — accumulated swap from crashed runs, residual page cache, CUDA driver state — not on which tensors are loading.
+The failure point varies (70%, 81%, 86%, 98%) and the root cause is **stale CUDA allocations in the GPU HBM pool**, not page cache pressure.
+
+When a training container is SIGKILL'd (e.g., OOM at training step 0), the NVIDIA driver does not immediately release its GPU HBM allocations. The dead container's model weights (~57 GB) and any training-step allocations stay resident in HBM as orphaned allocations. Each subsequent loading attempt uses a GPU with less available HBM:
+
+| Run | GPU free at start | % loaded before OOM |
+|---|---|---|
+| Clean start | ~124 GB | 100% ✓ |
+| After 1 SIGKILL'd run | less | ~86% |
+| After 2 SIGKILL'd runs | less | ~81% |
+| After 3 SIGKILL'd runs | less | ~70% |
+
+The orphaned allocations accumulate across Docker container restarts because `docker run --rm` cleans up the container filesystem but does not reset CUDA driver state. A new CUDA context initialization (e.g., a fresh `torch.cuda.init()` call in a new container) forces the driver to GC orphaned allocations from dead processes.
+
+**No Python traceback appears** because the OOM kill is issued by the CUDA driver or kernel before Python can print anything.
+
+### GPU pre-flight — required after any SIGKILL'd training run
+
+`run_train.sh` runs a throwaway training container before loading to force CUDA driver GC:
+
+```python
+import torch
+torch.cuda.init()
+torch.cuda.empty_cache()
+free, total = torch.cuda.mem_get_info()
+print(f'GPU free={free/1e9:.1f}GB total={total/1e9:.1f}GB used={(total-free)/1e9:.1f}GB')
+```
+
+This container initialises and immediately exits cleanly. The act of creating a new CUDA context forces the driver to release orphaned HBM allocations from prior dead containers. It also prints the GPU baseline so the log shows exactly how much HBM is available before loading begins.
+
+**Expected baseline** (clean system): `GPU free=124.0GB total=130.7GB used=6.6GB`
+
+If `used` is significantly above ~7 GB before a training run starts, stale allocations are present and loading will fail partway through.
 
 ### `low_cpu_mem_usage=True` — required for BF16 loading
 
@@ -116,25 +147,21 @@ With `low_cpu_mem_usage=True` the meta-device path is used: the model is initial
 
 > **Note:** `low_cpu_mem_usage=True` is set in `train_lora.py`. Do not remove it.
 
-### Page cache drop before training — required for BF16 loading
+### Page cache drop before training — secondary hygiene
 
-`run_train.sh` runs a throwaway privileged alpine container before the training container starts:
-
-```bash
-docker run --rm --privileged alpine \
-  sh -c 'echo 3 > /proc/sys/vm/drop_caches'
-```
-
-This writes `3` to the kernel's `drop_caches` interface as root (privileged containers can write to host `/proc/sys`), which releases all clean page cache and reclaimable slabs. On a system where prior training crashes left residual page cache or accumulated swap pressure, this clears the headroom needed for mmap + GPU to coexist during the last few percent of loading.
-
-**If the system has accumulated swap (from prior OOM-killed runs)**, interactive sudo is needed to fully reset before training:
+`run_train.sh` also drops the Linux page cache before loading (separate from the GPU pre-flight):
 
 ```bash
-sudo swapoff -a && sudo swapon -a          # evict all swap back to RAM, then re-enable
-sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'  # clear residual page cache
+docker run --rm --privileged alpine sh -c 'echo 3 > /proc/sys/vm/drop_caches'
 ```
 
-The swap accumulation pattern: each OOM-killed training container leaves some kernel-pinned pages that cannot be reclaimed without a privileged release. Over multiple crash/retry cycles this can push 3–5 GB into swap, shrinking the effective headroom for the next run.
+This is secondary hygiene — the Linux RAM pool is separate from GPU HBM and page cache alone will not cause a loading OOM. It does however keep the Linux pool clean so other processes on the system are not disrupted during the ~6-minute loading window.
+
+**Swap accumulation** from prior OOM-killed runs can push a few GB of pages to disk. `run_train.sh` attempts `sudo -n swapoff -a && swapon -a` before training; if that fails (sudo requires a password interactively), run it manually:
+
+```bash
+sudo swapoff -a && sudo swapon -a
+```
 
 ### Swap extension — last-resort burst headroom
 

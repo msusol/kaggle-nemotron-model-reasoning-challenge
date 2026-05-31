@@ -55,17 +55,17 @@ Swap:           15Gi          0B        15Gi
 
 There is no separate GPU VRAM pool — `nvidia-smi` reports `[N/A]` for `memory.total/free`. Docker's `--memory` cgroup limit covers the entire OS-visible pool (121 GB).
 
-### Default limits in `run_train.sh`
+### Memory limits in `run_train.sh`
 
-| Flag | Default | Purpose |
-|---|---|---|
-| `--memory` | `120g` | Hard container ceiling; leaves ~1 GB for the host OS kernel/driver |
-| `--memory-swap` | `128g` | Combined memory+swap ceiling; allows ~8 GB swap spill before hard kill |
+`run_train.sh` intentionally omits `--memory` / `--memory-swap` for the same reason as `run_prepare.sh`:
 
-Both are overridable via environment variables:
+- **`--ulimit memlock=-1` + a cgroup cap = silent OOM kill.** CUDA pins all model weights in RAM (no swap fallback). Safetensors mmap also holds all 13 HF shards open simultaneously (~60 GB of page cache), which is charged to the container cgroup on top of the model allocation (~57 GB). The combined total peaks near or above any reasonable cap, and the cgroup kills the container with no traceback.
+- **The kernel manages eviction correctly without a cap.** Training uses ~57 GB (model) + ~10 GB (activations/LoRA/optimizer) = ~67 GB, leaving ~54 GB for the host OS and desktop.
+
+If you need to cap memory for a specific experiment, pass the flags directly:
 
 ```bash
-DOCKER_MEMORY_LIMIT=120g DOCKER_MEMORY_SWAP=128g RUN_NAME=experiment bash scripts/run_train.sh
+docker run ... --memory 115g --memory-swap 120g ...
 ```
 
 ### PyTorch allocator tuning
@@ -83,17 +83,13 @@ If training is still OOM after these settings, the next lever is `max_seq_length
 
 ---
 
-## run_prepare.sh — one-time 4-bit cache
+## run_prepare.sh — DISABLED (broken quantized cache)
 
-`run_prepare.sh` quantizes the 30B BF16 model to 4-bit NF4 and saves it to `.cache/nemotron_4bit/`. Once the `.ready` sentinel exists, `run_train.sh` loads the 15 GB cache in ~1 min instead of re-doing the 6-min BF16 load every run.
+`run_prepare.sh` is currently disabled and will exit with an error if invoked.
 
-### Why prepare has no memory limit
+**Root cause:** `bitsandbytes load_in_4bit` only quantizes standard `nn.Linear` layers. Nemotron-H (30B-A3B MoE) stores its expert weight tensors as batched 3-D tensors, not `nn.Linear` modules, so they remain BF16. The resulting cache is ~57 GB instead of the expected ~15 GB — no useful memory saving, and worse OOM behavior than loading from the original 13-shard HF model directly.
 
-`run_prepare.sh` intentionally omits `--memory` / `--memory-swap`. Two reasons:
-
-1. **`--ulimit memlock=-1` + a hard memory cap = silent OOM kill.** The ulimit allows CUDA to pin unlimited memory in RAM (no swap fallback). When the cap is hit the cgroup kills the container instantly — no traceback, no `OOMKilled` flag, the progress bar just stops. This is what caused repeated deaths at 72–94%.
-
-2. **Prepare has no training overhead.** No gradients, no optimizer states, no activation buffers. The only spike is during BF16→4-bit conversion. The host has 120 GB free; removing the cap is safe.
+**Do not re-enable until** `prepare_quantized_model.py` is fixed to quantize expert layers explicitly. See `docs/investigate/` for analysis.
 
 ### `low_cpu_mem_usage=True` — cuts the BF16 loading peak
 

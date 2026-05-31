@@ -18,13 +18,12 @@ from trl import SFTConfig, SFTTrainer
 DEFAULT_MODEL = os.environ.get("BASE_MODEL_ID", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16")
 
 
-def _make_cache_dropper(interval: float = 5.0) -> threading.Event:
+def _make_cache_dropper(interval: float = 60.0) -> threading.Event:
     """Start a daemon thread that drops Linux page cache every `interval` seconds.
 
     On the GB10 unified-memory system, safetensors mmap pages and CUDA
-    allocations draw from the same physical pool. The kernel is blind to CUDA
-    usage, so page cache can fill the pool mid-shard even with min_free_kbytes
-    set high. Actively dropping cache during from_pretrained prevents this.
+    allocations draw from the same physical pool. Dropping cache occasionally
+    during from_pretrained prevents stale mmap pages from filling the pool.
     Requires CAP_SYS_ADMIN (granted via --privileged in run_train.sh).
     Returns a stop Event; set it to halt the thread after loading completes.
     """
@@ -116,7 +115,7 @@ def main():
     free, total = torch.cuda.mem_get_info()
     print(f"GPU before load: free={free/1e9:.1f}GB total={total/1e9:.1f}GB used={(total-free)/1e9:.1f}GB", flush=True)
 
-    _dropper_stop = _make_cache_dropper(interval=5.0)
+    _dropper_stop = _make_cache_dropper()
     try:
         model = AutoModelForCausalLM.from_pretrained(
             args.model_id,

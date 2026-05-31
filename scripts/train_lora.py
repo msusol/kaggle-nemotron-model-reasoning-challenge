@@ -6,11 +6,10 @@ import warnings
 
 import torch
 from datasets import load_dataset
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from peft import LoraConfig, get_peft_model
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
-    BitsAndBytesConfig,
     EarlyStoppingCallback,
 )
 from trl import SFTConfig, SFTTrainer
@@ -91,33 +90,12 @@ def main():
     free, total = torch.cuda.mem_get_info()
     print(f"GPU before load: free={free/1e9:.1f}GB total={total/1e9:.1f}GB used={(total-free)/1e9:.1f}GB", flush=True)
 
-    QUANTIZED_CACHE = "/workspace/.cache/nemotron_4bit"
-    if args.use_4bit:
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.bfloat16,
-        )
-        cached = os.path.exists(os.path.join(QUANTIZED_CACHE, ".ready"))
-        model_path = QUANTIZED_CACHE if cached else args.model_id
-        if cached:
-            print(f"Loading pre-quantized model from {QUANTIZED_CACHE}")
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            quantization_config=bnb_config,
-            device_map=device,
-            dtype=torch.bfloat16,
-            low_cpu_mem_usage=True,
-        )
-        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=False)
-    else:
-        model = AutoModelForCausalLM.from_pretrained(
-            args.model_id,
-            device_map=device,
-            dtype=torch.bfloat16,
-            low_cpu_mem_usage=True,
-        )
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_id,
+        device_map=device,
+        dtype=torch.bfloat16,
+        low_cpu_mem_usage=True,
+    )
     # Sync model config token IDs from tokenizer to avoid SFTTrainer alignment warning.
     model.config.pad_token_id = tokenizer.pad_token_id
     model.config.eos_token_id = tokenizer.eos_token_id

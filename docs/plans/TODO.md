@@ -50,6 +50,17 @@ Key changes for v0.3:
 - [ ] Fill in Section 8 Results once v0.2-cot Kaggle score known
 - [ ] Confirm both notebooks show under competition Code tab
 
+## Inference fix — HybridMambaAttentionDynamicCache
+
+See `docs/plans/hybrid-mamba-cache-inference.md` for full details.
+
+Pre-allocate Mamba SSM state cache before `model.generate()` via `sys.modules` pattern.
+Closes v0.4 Open Question #2 (Mamba fast path). Affects `infer_lora.py` and notebook cell 7.
+
+- [ ] Add `_get_mamba_cache_cls` helper + per-batch cache init to `scripts/infer_lora.py`
+- [ ] Update `generate_answer` in `notebook/kaggle_prize_eligibility_outline.ipynb` cell 7
+- [ ] Mark v0.4 Open Question #2 resolved in `docs/plans/v0.4-blended-plan.md`
+
 ## Phase 5 — v0.4 (huikang corpus SFT)
 
 See `docs/plans/v0.4-blended-plan.md` for full details.

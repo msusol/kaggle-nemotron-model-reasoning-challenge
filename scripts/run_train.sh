@@ -37,9 +37,16 @@ if [[ "${FORCE_PREPARE}" == "true" ]]; then
   bash "${SCRIPT_DIR}/run_prepare.sh"
 fi
 
-# Free page cache before loading model weights to prevent unified-memory
-# pressure from starving the GPU display driver and freezing the desktop.
-sync && sudo -n sh -c 'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null || true
+# Drop page cache before loading the 57 GB model. Without this, the mmap
+# page cache from the 13 HF shards accumulates alongside the GPU allocation
+# (~57 GB each), exhausting the 121 GB unified pool at the end of loading.
+# A privileged throwaway container can write /proc/sys/vm/drop_caches as root
+# without needing host sudo; fall back to host sudo if docker isn't available.
+sync
+docker run --rm --privileged alpine \
+  sh -c 'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null \
+  || sudo -n sh -c 'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null \
+  || true
 
 ionice -c 2 -n 7 docker run --rm --privileged \
   --name "nemotron-trainer" \
@@ -51,6 +58,7 @@ ionice -c 2 -n 7 docker run --rm --privileged \
   -e HF_TOKEN="${HF_TOKEN:?HF_TOKEN is not set}" \
   -e PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512" \
   -v "${WORKSPACE}":/workspace \
+  -v "${WORKSPACE}/.cache/huggingface":/home/ubuntu/.cache/huggingface \
   -v "${WORKSPACE}/.cache/triton":/home/ubuntu/.triton \
   -w /workspace \
   nemotron-gb10:latest \

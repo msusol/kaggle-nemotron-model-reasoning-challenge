@@ -37,15 +37,16 @@ if [[ "${FORCE_PREPARE}" == "true" ]]; then
   bash "${SCRIPT_DIR}/run_prepare.sh"
 fi
 
-# Drop page cache before loading the 57 GB model. Without this, the mmap
-# page cache from the 13 HF shards accumulates alongside the GPU allocation
-# (~57 GB each), exhausting the 121 GB unified pool at the end of loading.
-# A privileged throwaway container can write /proc/sys/vm/drop_caches as root
-# without needing host sudo; fall back to host sudo if docker isn't available.
+# Drop page cache and clear swap before loading the 57 GB model.
+# drop_caches=3 frees mmap page cache from any prior run's shard loading.
+# swapoff/swapon flushes swap pages back to RAM — a prior OOM-killed run can
+# leave GBs in swap which count against the 121 GB unified pool during loading.
+# Both operations run inside a privileged throwaway container (no host sudo needed).
 sync
-docker run --rm --privileged alpine \
-  sh -c 'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null \
-  || sudo -n sh -c 'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null \
+docker run --rm --privileged alpine sh -c \
+  'echo 3 > /proc/sys/vm/drop_caches && swapoff -a && swapon -a' 2>/dev/null \
+  || sudo -n sh -c \
+  'echo 3 > /proc/sys/vm/drop_caches && swapoff -a && swapon -a' 2>/dev/null \
   || true
 
 ionice -c 2 -n 7 docker run --rm --privileged \

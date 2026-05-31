@@ -62,6 +62,36 @@ Closes v0.4 Open Question #2 (Mamba fast path). Affects `infer_lora.py` and note
 - [x] Update `generate_answer` in `notebook/kaggle_prize_eligibility_outline.ipynb` cell 7
 - [x] Mark v0.4 Open Question #2 resolved in `docs/plans/v0.4-blended-plan.md` — closed via `is_fast_path_available=True` patch [cite:148]
 
+## MoE layer name audit
+
+From Tong Hui Kang's memory analysis (discussion #687961), MoE expert layers may be
+named `fc1`/`fc2` rather than `up_proj`/`down_proj`. If so, our current target_modules
+regex misses 856M LoRA params — the bulk of the 877M "typical" count.
+
+Run inside the container (no GPU needed — meta device only):
+
+```zsh
+docker run \
+  --rm \
+  -e HF_HOME=/workspace/.cache/huggingface \
+  -v "$PWD":/workspace \
+  -w /workspace \
+  nemotron-gb10:latest \
+  python3 -c "
+from transformers import AutoModelForCausalLM, AutoConfig
+import torch
+config = AutoConfig.from_pretrained('nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16')
+with torch.device('meta'):
+    m = AutoModelForCausalLM.from_config(config)
+leaf_names = sorted({n.split('.')[-1] for n, mod in m.named_modules()
+                     if hasattr(mod, 'weight') and len(list(mod.children())) == 0})
+print('\n'.join(leaf_names))
+"
+```
+
+- [ ] Run meta-device layer name dump; paste output to confirm `fc1`/`fc2` vs `up_proj`/`down_proj`
+- [ ] Update `target_modules` in `configs/nemotron.yaml` and `scripts/train_lora.py` if MoE layers are misnamed
+
 ## Phase 5 — v0.4 (huikang corpus SFT)
 
 See `docs/plans/v0.4-blended-plan.md` for full details.

@@ -44,6 +44,7 @@ This file maps the inline `[cite:N]` references used across the generated Markdo
 - `[cite:144]` NemotronH – Hugging Face Transformers Documentation — <https://huggingface.co/docs/transformers/model_doc/nemotron_h>[cite:144]
 
 - `[cite:145]` Why GRPO is Painfully Slow on Nemotron (and the Fix) – Kaggle competition discussion #690161 — KV cache name mismatch (`past_key_values` vs `cache_params`) causes 20× slowdown in GRPO; fix: transformers >= 5.3.0 + no `trust_remote_code=True` + `gradient_checkpointing=False` — <https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/690161>
+- `[cite:146]` Tips from Lucian Kucera – Kaggle competition discussion #688120 — RLVR after SFT gives huge boosts on bit_manipulation after 3 epochs; Muon optimizer better than AdamW for LoRA; equations have noisy train labels; isolate tasks for targeted eval; don't quantize during training; high-quality CoT beats quantity — <https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/688120>
 
 ## Usage note
 

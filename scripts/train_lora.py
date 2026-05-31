@@ -88,6 +88,9 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
 
     device = {"": 0}  # force all layers onto GPU 0 — no CPU offload on GB10
+    free, total = torch.cuda.mem_get_info()
+    print(f"GPU before load: free={free/1e9:.1f}GB total={total/1e9:.1f}GB used={(total-free)/1e9:.1f}GB", flush=True)
+
     QUANTIZED_CACHE = "/workspace/.cache/nemotron_4bit"
     if args.use_4bit:
         bnb_config = BitsAndBytesConfig(

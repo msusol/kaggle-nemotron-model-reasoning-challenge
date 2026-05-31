@@ -37,27 +37,34 @@ if [[ "${FORCE_PREPARE}" == "true" ]]; then
   bash "${SCRIPT_DIR}/run_prepare.sh"
 fi
 
-# Pre-loading memory setup: drop page cache and raise min_free_kbytes.
+# GPU pre-flight: force-initialize a clean CUDA context before loading the model.
 #
-# Root cause of loading OOM: default min_free_kbytes=45166 (44 MB) lets page
-# cache grow unchecked. During safetensors mmap loading, shard pages accumulate
-# in page cache while GPU tensors grow simultaneously — both in the same 128 GB
-# unified pool. At 100% loaded: ~57 GB GPU + ~57 GB page cache = ~114 GB, leaving
-# only ~14 GB headroom. CUDA context overhead or fragmentation crosses the limit.
-#
-# Fix: set min_free_kbytes=10 GB. The kernel then reclaims old shard pages as new
-# GPU tensors are allocated, capping combined usage at ~117 GB (128 - 10 reserve).
-# Swap is cleared separately because swapoff needs the host swap file path, which
-# does not exist inside the alpine container's filesystem.
+# Root cause of loading OOM: the GPU has a separate 130.7 GB pool from the 121 GB
+# Linux RAM. When a training container is SIGKILL'd (e.g. OOM at step 0), the NVIDIA
+# driver holds stale GPU allocations from the dead container. Each subsequent loading
+# attempt uses a progressively smaller GPU pool: 100% → 86% → 81% → 70% loaded.
+# Starting a new CUDA context forces the driver to GC orphaned allocations first.
+echo "GPU pre-flight..."
+docker run --rm --privileged \
+  -e NVIDIA_VISIBLE_DEVICES=all \
+  nemotron-gb10:latest \
+  python -c "
+import torch
+torch.cuda.init()
+torch.cuda.empty_cache()
+free, total = torch.cuda.mem_get_info()
+used = total - free
+print(f'GPU free={free/1e9:.1f}GB total={total/1e9:.1f}GB used={used/1e9:.1f}GB')
+if free < 60e9:
+    print('WARNING: less than 60 GB free — stale CUDA allocations may be present')
+" 2>&1 | grep -E "^GPU|^WARNING" || true
+
+# Drop page cache and clear swap.
 sync
 docker run --rm --privileged alpine sh -c \
-  'echo 3 > /proc/sys/vm/drop_caches && echo 10485760 > /proc/sys/vm/min_free_kbytes' \
-  2>/dev/null \
-  || sudo -n sh -c \
-  'echo 3 > /proc/sys/vm/drop_caches && echo 10485760 > /proc/sys/vm/min_free_kbytes' \
-  2>/dev/null \
+  'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null \
+  || sudo -n sh -c 'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null \
   || true
-# swapoff needs the host filesystem (/swap.img) — run via host sudo, not inside container.
 sudo -n sh -c 'swapoff -a && swapon -a' 2>/dev/null || true
 
 ionice -c 2 -n 7 docker run --rm --privileged \
@@ -93,12 +100,6 @@ ionice -c 2 -n 7 docker run --rm --privileged \
     --early-stopping-patience "${EARLY_STOPPING_PATIENCE:-0}" \
     ${USE_4BIT_FLAG} \
   2>&1 | tee "${LOG_FILE}" || true
-
-# Restore min_free_kbytes to system default after training.
-docker run --rm --privileged alpine sh -c \
-  'echo 45166 > /proc/sys/vm/min_free_kbytes' 2>/dev/null \
-  || sudo -n sh -c 'echo 45166 > /proc/sys/vm/min_free_kbytes' 2>/dev/null \
-  || true
 
 echo "Log saved to ${LOG_FILE}"
 echo "Adapter saved to ${ADAPTER_DIR}"

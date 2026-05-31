@@ -76,7 +76,7 @@ if free < 60e9:
 # can reach the swap file, which doesn't exist inside the container's own filesystem.
 sync
 docker run --rm --privileged -v /:/host alpine sh -c \
-  'echo 3 > /proc/sys/vm/drop_caches \
+  'echo 1 > /proc/sys/vm/drop_caches \
    && echo 1048576 > /proc/sys/vm/min_free_kbytes \
    && echo 500 > /proc/sys/vm/vfs_cache_pressure \
    && swapoff /host/swap.img 2>/dev/null; swapon /host/swap.img 2>/dev/null; true' \

@@ -183,12 +183,11 @@ def main():
         lr_scheduler_type="cosine",
         max_grad_norm=1.0,
         max_seq_length=args.max_seq_length,
-        # use_reentrant=False uses PyTorch generic checkpointing — does not call
-        # gradient_checkpointing_enable() and works without native NemotronH support.
-        # Required at seq_len=8192: without this, all layer activations are held in
-        # memory simultaneously, exceeding the 121 GB unified pool at step 0.
-        gradient_checkpointing=True,
-        gradient_checkpointing_kwargs={"use_reentrant": False},
+        # NemotronHForCausalLM does not implement gradient_checkpointing_enable();
+        # SFTTrainer raises ValueError if gradient_checkpointing=True.
+        # Empirically, seq_len=8192 + frozen base + LoRA fits the 130 GB unified
+        # pool without GC (confirmed: run 235341 trained 5 steps at ~33 s/step).
+        gradient_checkpointing=False,
     )
 
     callbacks = []

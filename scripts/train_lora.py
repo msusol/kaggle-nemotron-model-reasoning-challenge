@@ -18,12 +18,14 @@ from trl import SFTConfig, SFTTrainer
 DEFAULT_MODEL = os.environ.get("BASE_MODEL_ID", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16")
 
 
-def _make_cache_dropper(interval: float = 60.0) -> threading.Event:
+def _make_cache_dropper(interval: float = 20.0) -> threading.Event:
     """Start a daemon thread that drops Linux page cache every `interval` seconds.
 
     On the GB10 unified-memory system, safetensors mmap pages and CUDA
-    allocations draw from the same physical pool. Dropping cache occasionally
-    during from_pretrained prevents stale mmap pages from filling the pool.
+    allocations share the same physical pool. At 60 s the page cache grows
+    ~10-14 GB between drops; combined with ~57 GB of CUDA tensors near the
+    end of loading this triggers NV_ERR_NO_MEMORY in the NVIDIA driver.
+    20 s limits page-cache buildup to ~3 GB while avoiding NVMe thrash.
     Requires CAP_SYS_ADMIN (granted via --privileged in run_train.sh).
     Returns a stop Event; set it to halt the thread after loading completes.
     """

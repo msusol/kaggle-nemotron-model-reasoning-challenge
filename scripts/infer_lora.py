@@ -13,6 +13,7 @@ Usage:
 import argparse
 import json
 import os
+import sys
 
 import torch
 from peft import PeftModel
@@ -21,6 +22,13 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 DEFAULT_MODEL = os.environ.get("BASE_MODEL_ID", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16")
 MAX_MEMORY = {0: "115GiB"}
+
+
+def _get_mamba_cache_cls(model):
+    mod = sys.modules.get(model.__class__.__module__)
+    if mod is None:
+        return None
+    return getattr(mod, "HybridMambaAttentionDynamicCache", None)
 
 
 def build_prompt(row: dict, tokenizer) -> str:
@@ -64,6 +72,8 @@ def main():
     model = PeftModel.from_pretrained(model, args.adapter_dir)
     model.eval()
 
+    cache_cls = _get_mamba_cache_cls(model)
+
     rows = []
     with open(args.data_file, encoding="utf-8") as fh:
         for line in fh:
@@ -82,12 +92,24 @@ def main():
                 truncation=True,
                 max_length=2048,
             ).to(model.device)
+            pkv = None
+            if cache_cls is not None:
+                try:
+                    pkv = cache_cls(
+                        model.config,
+                        batch_size=len(batch),
+                        dtype=torch.bfloat16,
+                        device=model.device,
+                    )
+                except Exception:
+                    pkv = None
             with torch.no_grad():
                 outputs = model.generate(
                     **inputs,
                     max_new_tokens=args.max_new_tokens,
                     do_sample=False,
                     pad_token_id=tokenizer.eos_token_id,
+                    past_key_values=pkv,
                 )
             # Decode only the newly generated tokens (strip the prompt).
             input_len = inputs["input_ids"].shape[1]

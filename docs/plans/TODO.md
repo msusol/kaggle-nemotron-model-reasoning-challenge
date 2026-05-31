@@ -58,8 +58,8 @@ See `docs/plans/hybrid-mamba-cache-inference.md` for full details.
 Pre-allocate Mamba SSM state cache before `model.generate()` via `sys.modules` pattern.
 Closes v0.4 Open Question #2 (Mamba fast path). Affects `infer_lora.py` and notebook cell 7.
 
-- [ ] Add `_get_mamba_cache_cls` helper + per-batch cache init to `scripts/infer_lora.py`
-- [ ] Update `generate_answer` in `notebook/kaggle_prize_eligibility_outline.ipynb` cell 7
+- [x] Add `_get_mamba_cache_cls` helper + per-batch cache init to `scripts/infer_lora.py`
+- [x] Update `generate_answer` in `notebook/kaggle_prize_eligibility_outline.ipynb` cell 7
 - [x] Mark v0.4 Open Question #2 resolved in `docs/plans/v0.4-blended-plan.md` — closed via `is_fast_path_available=True` patch [cite:148]
 
 ## Phase 5 — v0.4 (huikang corpus SFT)

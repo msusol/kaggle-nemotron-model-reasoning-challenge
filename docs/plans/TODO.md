@@ -73,7 +73,7 @@ v0.4a/b (synthetic CoT generation) superseded by `samvalladares/huikang-nemotron
 Key changes vs v0.3: `max_seq_length=8192`, expanded `target_modules` (+ q/k/v/o/lm_head),
 `num_epochs=1`, data from huikang corpus. Config updated in `nemotron.yaml` + `train_lora.py`.
 
-- [ ] Write `scripts/extract_huikang_corpus.py` — decode pre-tokenized corpus → JSONL
+- [x] Write `scripts/extract_huikang_corpus.py` — decode pre-tokenized corpus → JSONL
 - [ ] Run extraction → `data/v0.4_train.jsonl` + `data/v0.4_valid.jsonl`; verify type distribution
 - [ ] Run `RUN_NAME=huikang_v4 bash scripts/run_train.sh`
 - [ ] Validate, package, submit; record in leaderboard

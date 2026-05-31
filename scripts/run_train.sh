@@ -82,6 +82,9 @@ docker run --rm --privileged -v /:/host alpine sh -c \
    && swapoff /host/swap.img 2>/dev/null; swapon /host/swap.img 2>/dev/null; true' \
   2>/dev/null || true
 
+# Remove any stale container from a previous killed run.
+docker rm -f nemotron-trainer 2>/dev/null || true
+
 ionice -c 2 -n 7 docker run --privileged \
   --name "nemotron-trainer" \
   --oom-score-adj -500 \

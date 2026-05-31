@@ -109,3 +109,4 @@ Sequencing options (see plan for detail):
 - [x] `RUN_NAME` support in `run_train.sh` — named log + adapter dirs
 - [x] `scripts/download_peer_cot.py` + `run_download_peer_cot.sh`
 - [x] HF Hub adapter published — `marksusol/nemotron-nano-30b-lora-reasoning` (v0.1-baseline placeholder)
+- [x] `is_fast_path_available=True` patch in `train_lora.py` — forces Mamba CUDA kernels via `sys.modules` scan; `--use-4bit` blocked (QLoRA broken for Nemotron-H) [cite:148]

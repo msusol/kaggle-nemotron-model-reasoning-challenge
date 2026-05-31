@@ -5,9 +5,18 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="$(dirname "$SCRIPT_DIR")"
 
+# Prefer the shared Kaggle venv (one level above the project root) so this script
+# works regardless of which python3 is on PATH in the calling shell.
+_VENV_PY="${WORKSPACE}/../.venv/bin/python3"
+if [[ -x "${_VENV_PY}" ]]; then
+  _PYTHON="${_VENV_PY}"
+else
+  _PYTHON="python3"
+fi
+
 FILES=("${@:-${WORKSPACE}/configs/nemotron.yaml}")
 
-eval "$(python3 - "${FILES[@]}" <<'PYEOF'
+eval "$("${_PYTHON}" - "${FILES[@]}" <<'PYEOF'
 import sys, shlex, yaml
 
 merged = {}

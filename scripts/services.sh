@@ -2,12 +2,15 @@
 # Pause and resume non-training Docker containers around a training run.
 #
 # Usage:
-#   bash scripts/services.sh pause    # stop all running containers except the training image;
+#   bash scripts/services.sh pause    # stop all running service containers;
 #                                     # save names to .paused_containers
 #   bash scripts/services.sh resume   # restart every container listed in .paused_containers
 #
-# The script is agnostic to which containers are running — it snapshots whatever
-# is up at pause time and restores exactly that set on resume.
+# "Service containers" are defined as: any non-training container with a restart
+# policy of unless-stopped or always (i.e., long-lived services, not one-shot
+# Nextflow tasks or manually-run containers). This includes containers that are
+# already stopped (e.g., after a system reboot) — they are still written to the
+# state file so resume can start them back up after training.
 
 set -euo pipefail
 
@@ -17,21 +20,32 @@ STATE_FILE="${WORKSPACE}/.paused_containers"
 TRAINING_IMAGE="nemotron-gb10"
 
 pause() {
-  local running
-  running=$(docker ps --format '{{.Names}}\t{{.Image}}' \
-    | awk -v img="$TRAINING_IMAGE" '$2 !~ img {print $1}')
+  # Find all non-training containers with a persistent restart policy,
+  # whether currently running or already stopped.
+  local services=()
+  while IFS= read -r name; do
+    local policy
+    policy=$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "$name" 2>/dev/null || true)
+    if [[ "$policy" == "unless-stopped" || "$policy" == "always" ]]; then
+      services+=("$name")
+    fi
+  done < <(docker ps -a --format '{{.Names}}' | grep -v "^${TRAINING_IMAGE}")
 
-  if [[ -z "$running" ]]; then
-    echo "No non-training containers currently running."
+  if [[ ${#services[@]} -eq 0 ]]; then
+    echo "No non-training service containers found."
     return
   fi
 
-  echo "$running" > "$STATE_FILE"
-  echo "Stopping:"
-  while IFS= read -r name; do
-    echo "  $name"
-    docker stop "$name" > /dev/null
-  done <<< "$running"
+  printf '%s\n' "${services[@]}" > "$STATE_FILE"
+  echo "Service containers:"
+  for name in "${services[@]}"; do
+    if docker ps -q --filter "name=^${name}$" 2>/dev/null | grep -q .; then
+      echo "  Stopping: $name"
+      docker stop --time=60 "$name" > /dev/null
+    else
+      echo "  Already stopped: $name (will be started on resume)"
+    fi
+  done
   echo "Saved container list to ${STATE_FILE}"
 }
 
@@ -41,11 +55,14 @@ resume() {
     return
   fi
 
-  echo "Restarting:"
+  echo "Starting service containers:"
   while IFS= read -r name; do
     [[ -z "$name" ]] && continue
-    echo "  $name"
-    docker start "$name" > /dev/null
+    if docker start "$name" > /dev/null 2>&1; then
+      echo "  Started: $name"
+    else
+      echo "  Skipped: $name (start failed — container may be stale or image missing)"
+    fi
   done < "$STATE_FILE"
 
   rm "$STATE_FILE"

@@ -91,17 +91,54 @@ If training is still OOM after these settings, the next lever is `max_seq_length
 
 **Do not re-enable until** `prepare_quantized_model.py` is fixed to quantize expert layers explicitly. See `docs/investigate/` for analysis.
 
-### `low_cpu_mem_usage=True` — cuts the BF16 loading peak
+### Why the model dies at ~76–98% of weight loading
 
-Without this flag, `from_pretrained` loads each ~5 GB safetensors shard fully into memory before quantizing — 13 shards means up to ~5 GB of BF16 is held alongside the accumulating 4-bit model.
+During BF16 loading, two allocations grow simultaneously and compete for the same 121 GB pool:
 
-With `low_cpu_mem_usage=True` the meta-device path is used instead: the model is initialised as an empty shell and weights stream in **one tensor at a time**, so the peak BF16 footprint is a few hundred MB (the largest single tensor) rather than a full shard. This was the fix that allowed 401/401 tensors to load where 94% had been the previous ceiling.
+| Allocation | Source | Size at 100% load |
+|---|---|---|
+| GPU (unified memory) | tensors placed on device as each is loaded | ~57 GB |
+| Kernel page cache | safetensors `mmap` pages from the 13 HF shards | up to ~57 GB |
 
-> **Note:** `low_cpu_mem_usage=True` is set in both `prepare_quantized_model.py` and `train_lora.py`. Do not remove it.
+Both are backed by physical RAM on the GB10 unified-memory architecture. The GPU allocation is **pinned** (cannot be swapped or evicted). The mmap pages are evictable, but the kernel does not evict them fast enough when the demand curve is smooth — it prefers to serve pages from cache rather than evict clean pages proactively.
+
+**At ~98% loaded (~56 GB on GPU) the combined pressure approaches 113 GB**, which leaves only ~8 GB for the OS, desktop, and driver. If anything else competes for that headroom — accumulated swap from prior crashed runs, CUDA driver workspace, a background process paging in — the OOM killer fires with no Python traceback.
+
+**This is NOT about the last shard being an extra or optional.** All 13 shards / 401 tensors are required. The death near the end of loading is purely a memory arithmetic problem: GPU + mmap page cache ≈ 2× model size, and 2 × 57 GB = 114 GB sits right at the 121 GB ceiling.
+
+The failure point varies (73%, 76%, 98%) depending on prior system state — accumulated swap from crashed runs, residual page cache, CUDA driver state — not on which tensors are loading.
+
+### `low_cpu_mem_usage=True` — required for BF16 loading
+
+Without this flag, `from_pretrained` first constructs the full model as empty (zero-filled) CPU tensors (~57 GB), then streams the safetensors data into those tensors. The empty model + the mmap page cache + the partial GPU allocation stack up to well over 121 GB even in the first half of loading.
+
+With `low_cpu_mem_usage=True` the meta-device path is used: the model is initialised as an empty **shell with no backing memory**, and weights stream in one tensor at a time directly to their final device location. This eliminates the empty-model spike and moves the ceiling from ~76% to ~98% of loading — but the dual-pressure problem (GPU + mmap) is not fully resolved by this flag alone.
+
+> **Note:** `low_cpu_mem_usage=True` is set in `train_lora.py`. Do not remove it.
+
+### Page cache drop before training — required for BF16 loading
+
+`run_train.sh` runs a throwaway privileged alpine container before the training container starts:
+
+```bash
+docker run --rm --privileged alpine \
+  sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+```
+
+This writes `3` to the kernel's `drop_caches` interface as root (privileged containers can write to host `/proc/sys`), which releases all clean page cache and reclaimable slabs. On a system where prior training crashes left residual page cache or accumulated swap pressure, this clears the headroom needed for mmap + GPU to coexist during the last few percent of loading.
+
+**If the system has accumulated swap (from prior OOM-killed runs)**, interactive sudo is needed to fully reset before training:
+
+```bash
+sudo swapoff -a && sudo swapon -a          # evict all swap back to RAM, then re-enable
+sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'  # clear residual page cache
+```
+
+The swap accumulation pattern: each OOM-killed training container leaves some kernel-pinned pages that cannot be reclaimed without a privileged release. Over multiple crash/retry cycles this can push 3–5 GB into swap, shrinking the effective headroom for the next run.
 
 ### Swap extension — last-resort burst headroom
 
-If the host still OOM-kills prepare (the final few tensors — `lm_head`, last SSM layers — are the largest), extend swap before running:
+If loading still OOM-kills after the above steps, extend swap before running:
 
 ```bash
 sudo fallocate -l 32G /swapfile2

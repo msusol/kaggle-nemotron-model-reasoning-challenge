@@ -171,9 +171,12 @@ def main():
         lr_scheduler_type="cosine",
         max_grad_norm=1.0,
         max_seq_length=args.max_seq_length,
-        # NemotronH does not support gradient_checkpointing_enable(); disable it here
-        # so TRL's SFTTrainer doesn't call that method. Memory is managed via 4-bit quant.
-        gradient_checkpointing=False,
+        # use_reentrant=False uses PyTorch generic checkpointing — does not call
+        # gradient_checkpointing_enable() and works without native NemotronH support.
+        # Required at seq_len=8192: without this, all layer activations are held in
+        # memory simultaneously, exceeding the 121 GB unified pool at step 0.
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
     )
 
     callbacks = []

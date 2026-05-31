@@ -59,12 +59,22 @@ if free < 60e9:
     print('WARNING: less than 60 GB free — stale CUDA allocations may be present')
 " 2>&1 | grep -E "^GPU|^WARNING" || true
 
-# Drop page cache and clear swap.
+# Drop page cache, clear swap, and tune VM for model loading.
+#
+# On the GB10 unified-memory system, safetensors mmap page cache and GPU model
+# allocations share the same physical LPDDR5x pool. Default min_free_kbytes
+# (~44 MB) allows page cache to grow until the pool is exhausted mid-shard.
+# Setting it to 20 GB forces the kernel to reclaim old shard pages proactively.
+# vfs_cache_pressure=500 makes file-backed page eviction 5x more aggressive.
+#
 # Mounting /:/host gives the alpine container access to /host/swap.img so swapoff
 # can reach the swap file, which doesn't exist inside the container's own filesystem.
 sync
 docker run --rm --privileged -v /:/host alpine sh -c \
-  'echo 3 > /proc/sys/vm/drop_caches && swapoff /host/swap.img && swapon /host/swap.img' \
+  'echo 3 > /proc/sys/vm/drop_caches \
+   && echo 20971520 > /proc/sys/vm/min_free_kbytes \
+   && echo 500 > /proc/sys/vm/vfs_cache_pressure \
+   && swapoff /host/swap.img 2>/dev/null; swapon /host/swap.img 2>/dev/null; true' \
   2>/dev/null || true
 
 ionice -c 2 -n 7 docker run --rm --privileged \
@@ -100,6 +110,11 @@ ionice -c 2 -n 7 docker run --rm --privileged \
     --early-stopping-patience "${EARLY_STOPPING_PATIENCE:-0}" \
     ${USE_4BIT_FLAG} \
   2>&1 | tee "${LOG_FILE}" || true
+
+# Restore VM defaults.
+docker run --rm --privileged alpine sh -c \
+  'echo 45166 > /proc/sys/vm/min_free_kbytes && echo 100 > /proc/sys/vm/vfs_cache_pressure' \
+  2>/dev/null || true
 
 echo "Log saved to ${LOG_FILE}"
 echo "Adapter saved to ${ADAPTER_DIR}"

@@ -200,6 +200,7 @@ ionice -c 2 -n 7 docker run --privileged \
   2>&1 | tee "${LOG_FILE}"
 TRAIN_EXIT=${PIPESTATUS[0]}
 set -e
+echo  # blank line — tqdm leaves no trailing newline on exit
 
 # Restore VM defaults regardless of training outcome (kernel tuning only).
 docker run --rm --privileged alpine sh -c \

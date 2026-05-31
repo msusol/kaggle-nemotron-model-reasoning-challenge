@@ -31,6 +31,37 @@ def _make_cache_dropper(interval: float = 20.0) -> threading.Event:
     """
     stop = threading.Event()
 
+    def _mem_stats() -> str:
+        parts = []
+        # CUDA pool (driver's view of the unified physical pool).
+        try:
+            import torch as _torch
+            free, total = _torch.cuda.mem_get_info()
+            alloc = _torch.cuda.memory_allocated()
+            reserv = _torch.cuda.memory_reserved()
+            parts.append(
+                f"cuda free={free/1e9:.1f}GB alloc={alloc/1e9:.1f}GB reserv={reserv/1e9:.1f}GB"
+            )
+        except Exception:
+            pass
+        # Linux kernel's view: MemFree + Cached (file-backed pages).
+        try:
+            info = {}
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    k, v = line.split(":", 1)
+                    info[k.strip()] = int(v.split()[0])  # kB
+            def gb(kb):
+                return kb / 1e6
+            parts.append(
+                f"linux free={gb(info['MemFree']):.1f}GB cached={gb(info.get('Cached', 0)):.1f}GB"
+                f" active_file={gb(info.get('Active(file)', 0)):.1f}GB"
+                f" inactive_file={gb(info.get('Inactive(file)', 0)):.1f}GB"
+            )
+        except Exception:
+            pass
+        return " | ".join(parts)
+
     def _loop():
         while not stop.wait(interval):
             try:
@@ -38,6 +69,7 @@ def _make_cache_dropper(interval: float = 20.0) -> threading.Event:
                     fh.write("3\n")
             except OSError:
                 pass  # non-privileged container — skip silently
+            print(f"[dropper] {_mem_stats()}", flush=True)
 
     t = threading.Thread(target=_loop, daemon=True, name="cache-dropper")
     t.start()

@@ -56,6 +56,8 @@ ionice -c 2 -n 7 docker run --rm --privileged \
   --ulimit stack=67108864 \
   --user "$(id -u):$(id -g)" \
   -e HF_TOKEN="${HF_TOKEN:?HF_TOKEN is not set}" \
+  -e TRANSFORMERS_OFFLINE=1 \
+  -e HF_DATASETS_OFFLINE=1 \
   -e PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512" \
   -v "${WORKSPACE}":/workspace \
   -v "${WORKSPACE}/.cache/huggingface":/home/ubuntu/.cache/huggingface \

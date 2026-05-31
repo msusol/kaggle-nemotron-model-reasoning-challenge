@@ -2,6 +2,7 @@ import argparse
 import math
 import os
 import sys
+import threading
 import warnings
 
 import torch
@@ -15,6 +16,31 @@ from transformers import (
 from trl import SFTConfig, SFTTrainer
 
 DEFAULT_MODEL = os.environ.get("BASE_MODEL_ID", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16")
+
+
+def _make_cache_dropper(interval: float = 5.0) -> threading.Event:
+    """Start a daemon thread that drops Linux page cache every `interval` seconds.
+
+    On the GB10 unified-memory system, safetensors mmap pages and CUDA
+    allocations draw from the same physical pool. The kernel is blind to CUDA
+    usage, so page cache can fill the pool mid-shard even with min_free_kbytes
+    set high. Actively dropping cache during from_pretrained prevents this.
+    Requires CAP_SYS_ADMIN (granted via --privileged in run_train.sh).
+    Returns a stop Event; set it to halt the thread after loading completes.
+    """
+    stop = threading.Event()
+
+    def _loop():
+        while not stop.wait(interval):
+            try:
+                with open("/proc/sys/vm/drop_caches", "w") as fh:
+                    fh.write("3\n")
+            except OSError:
+                pass  # non-privileged container — skip silently
+
+    t = threading.Thread(target=_loop, daemon=True, name="cache-dropper")
+    t.start()
+    return stop
 
 
 def format_example(example, tokenizer):
@@ -90,12 +116,16 @@ def main():
     free, total = torch.cuda.mem_get_info()
     print(f"GPU before load: free={free/1e9:.1f}GB total={total/1e9:.1f}GB used={(total-free)/1e9:.1f}GB", flush=True)
 
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model_id,
-        device_map=device,
-        dtype=torch.bfloat16,
-        low_cpu_mem_usage=True,
-    )
+    _dropper_stop = _make_cache_dropper(interval=5.0)
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_id,
+            device_map=device,
+            dtype=torch.bfloat16,
+            low_cpu_mem_usage=True,
+        )
+    finally:
+        _dropper_stop.set()
     # Sync model config token IDs from tokenizer to avoid SFTTrainer alignment warning.
     model.config.pad_token_id = tokenizer.pad_token_id
     model.config.eos_token_id = tokenizer.eos_token_id

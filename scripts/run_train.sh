@@ -61,24 +61,31 @@ if free < 60e9:
 
 # Drop page cache, clear swap, and tune VM for model loading.
 #
-# On the GB10 unified-memory system, safetensors mmap page cache and GPU model
-# allocations share the same physical LPDDR5x pool. Default min_free_kbytes
-# (~44 MB) allows page cache to grow until the pool is exhausted mid-shard.
-# Setting it to 20 GB forces the kernel to reclaim old shard pages proactively.
-# vfs_cache_pressure=500 makes file-backed page eviction 5x more aggressive.
+# On the GB10 unified-memory system, CUDA allocations and the Linux page cache
+# draw from the same physical LPDDR5x pool, but each side's allocator is blind
+# to the other's usage. Default min_free_kbytes (~44 MB) lets page cache grow
+# until the shared pool is exhausted mid-shard.
+#
+# min_free_kbytes=40 GB: at 69% of weight loading (~41 GB in CUDA), the kernel
+# still sees that memory as "free" and lets page cache fill it. 40 GB headroom
+# ensures eviction pressure is strong enough to stay ahead of CUDA growth.
+# vfs_cache_pressure=500 makes file-backed page eviction 5× more aggressive.
+# train_lora.py also drops page cache every 5 s during from_pretrained (see
+# _make_cache_dropper) as an active complement to this watermark.
 #
 # Mounting /:/host gives the alpine container access to /host/swap.img so swapoff
 # can reach the swap file, which doesn't exist inside the container's own filesystem.
 sync
 docker run --rm --privileged -v /:/host alpine sh -c \
   'echo 3 > /proc/sys/vm/drop_caches \
-   && echo 20971520 > /proc/sys/vm/min_free_kbytes \
+   && echo 41943040 > /proc/sys/vm/min_free_kbytes \
    && echo 500 > /proc/sys/vm/vfs_cache_pressure \
    && swapoff /host/swap.img 2>/dev/null; swapon /host/swap.img 2>/dev/null; true' \
   2>/dev/null || true
 
-ionice -c 2 -n 7 docker run --rm --privileged \
+ionice -c 2 -n 7 docker run --privileged \
   --name "nemotron-trainer" \
+  --oom-score-adj -500 \
   -e NVIDIA_VISIBLE_DEVICES=all \
   --ipc=host \
   --ulimit memlock=-1 \

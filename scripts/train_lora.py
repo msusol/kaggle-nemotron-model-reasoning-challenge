@@ -1,6 +1,7 @@
 import argparse
 import math
 import os
+import sys
 import warnings
 
 import torch
@@ -65,6 +66,14 @@ def main():
     if args.lora_r > 32:
         raise ValueError("Competition constraint violated: --lora-r must be <= 32")
 
+    if args.use_4bit:
+        raise RuntimeError(
+            "--use-4bit is not supported for Nemotron-H: quantized layers cause "
+            "incompatible tensor shapes with both the fast and slow Mamba paths "
+            "(fast path → shape error; slow path → Half/Float dtype error). "
+            "Run without --use-4bit; the GB10 has sufficient memory for BF16."
+        )
+
     # Suppress FutureWarning from transformers NemotronH causal-mask internals
     # (input_embeds → inputs_embeds rename; fires every forward pass, not our code).
     warnings.filterwarnings(
@@ -110,6 +119,12 @@ def main():
     model.config.eos_token_id = tokenizer.eos_token_id
     model.config.bos_token_id = tokenizer.bos_token_id
     model.config.use_cache = False
+
+    # Force Mamba fast-path CUDA kernels (mamba_ssm / causal_conv1d installed in container).
+    # Matches what the 0.85 reference notebook does explicitly. [cite:148]
+    for _name, _mod in sys.modules.items():
+        if "modeling_nemotron_h" in _name and hasattr(_mod, "is_fast_path_available"):
+            _mod.is_fast_path_available = True
 
     peft_config = LoraConfig(
         r=args.lora_r,

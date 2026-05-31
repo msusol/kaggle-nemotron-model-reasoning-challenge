@@ -113,6 +113,7 @@ def main():
             args.model_id,
             device_map=device,
             dtype=torch.bfloat16,
+            low_cpu_mem_usage=True,
         )
     # Sync model config token IDs from tokenizer to avoid SFTTrainer alignment warning.
     model.config.pad_token_id = tokenizer.pad_token_id

@@ -60,12 +60,12 @@ if free < 60e9:
 " 2>&1 | grep -E "^GPU|^WARNING" || true
 
 # Drop page cache and clear swap.
+# Mounting /:/host gives the alpine container access to /host/swap.img so swapoff
+# can reach the swap file, which doesn't exist inside the container's own filesystem.
 sync
-docker run --rm --privileged alpine sh -c \
-  'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null \
-  || sudo -n sh -c 'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null \
-  || true
-sudo -n sh -c 'swapoff -a && swapon -a' 2>/dev/null || true
+docker run --rm --privileged -v /:/host alpine sh -c \
+  'echo 3 > /proc/sys/vm/drop_caches && swapoff /host/swap.img && swapon /host/swap.img' \
+  2>/dev/null || true
 
 ionice -c 2 -n 7 docker run --rm --privileged \
   --name "nemotron-trainer" \

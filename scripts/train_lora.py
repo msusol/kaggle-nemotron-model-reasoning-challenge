@@ -2,7 +2,6 @@ import argparse
 import math
 import os
 import sys
-import threading
 import warnings
 
 import torch
@@ -91,32 +90,12 @@ def main():
     free, total = torch.cuda.mem_get_info()
     print(f"GPU before load: free={free/1e9:.1f}GB total={total/1e9:.1f}GB used={(total-free)/1e9:.1f}GB", flush=True)
 
-    # Drop Linux page cache every 20 s during model loading.
-    # As safetensors shards are mmap'd, their pages accumulate in the LPDDR5x
-    # pool shared with CUDA tensor overflow from HBM. Over the ~8 min load
-    # window this pressure can exceed the 121 GB ceiling and trigger a SIGKILL
-    # with no Python traceback. Periodic drop_caches (level 1 = page cache only)
-    # reclaims the already-processed shard pages and keeps headroom stable.
-    # The container runs --privileged so writing /proc/sys/vm/drop_caches works.
-    _stop_dropper = threading.Event()
-
-    def _cache_dropper():
-        while not _stop_dropper.wait(20):
-            try:
-                with open("/proc/sys/vm/drop_caches", "w") as _f:
-                    _f.write("1\n")
-            except OSError:
-                break
-
-    threading.Thread(target=_cache_dropper, daemon=True).start()
-
     model = AutoModelForCausalLM.from_pretrained(
         args.model_id,
         device_map=device,
         dtype=torch.bfloat16,
         low_cpu_mem_usage=True,
     )
-    _stop_dropper.set()
     # Sync model config token IDs from tokenizer to avoid SFTTrainer alignment warning.
     model.config.pad_token_id = tokenizer.pad_token_id
     model.config.eos_token_id = tokenizer.eos_token_id

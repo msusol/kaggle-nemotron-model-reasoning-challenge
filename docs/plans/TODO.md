@@ -74,7 +74,7 @@ Key changes vs v0.3: `max_seq_length=8192`, expanded `target_modules` (+ q/k/v/o
 `num_epochs=1`, data from huikang corpus. Config updated in `nemotron.yaml` + `train_lora.py`.
 
 - [x] Write `scripts/extract_huikang_corpus.py` — decode pre-tokenized corpus → JSONL
-- [ ] Run extraction → `data/v0.4_train.jsonl` + `data/v0.4_valid.jsonl`; verify type distribution
+- [x] Run extraction → `data/v0.4_train.jsonl` + `data/v0.4_valid.jsonl`; verify type distribution
 - [ ] Run `RUN_NAME=huikang_v4 bash scripts/run_train.sh`
 - [ ] Validate, package, submit; record in leaderboard
 - [ ] Link `samvalladares/huikang-nemotron-artifacts` from prize eligibility notebook (Rule 6)

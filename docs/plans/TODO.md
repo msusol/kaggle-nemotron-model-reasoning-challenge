@@ -47,6 +47,7 @@ Key changes for v0.3:
 - [x] Submission demo published — `gdataranger/nemotron-lora-submission-demo`
 - [x] Both notebooks run end-to-end (FULL_DEMO=False, trl wrapped, trl import guarded)
 - [x] `ryanholbrook/nvidia-utility-script` added as input manually via Kaggle UI
+- [x] Remove `trust_remote_code=True` from prize eligibility notebook cell 5 — prevents cached buggy `modeling_nemotron_h.py` overriding transformers 5.5.3 fix [cite:147]
 - [ ] Fill in Section 8 Results once v0.2-cot Kaggle score known
 - [ ] Confirm both notebooks show under competition Code tab
 

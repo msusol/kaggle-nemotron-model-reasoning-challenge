@@ -10,9 +10,5 @@
     "deep learning",
     "text data",
     "pytorch"
-  ],
-  "collaborators": [
-    {"username": "huikang",       "role": "reader"},
-    {"username": "samvalladares", "role": "reader"}
   ]
 }

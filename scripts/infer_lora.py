@@ -7,7 +7,7 @@ Output JSONL: {"id": ..., "output": <full model generation>}
 Usage:
   python scripts/infer_lora.py \
     --adapter-dir /workspace/output/adapter \
-    --data-file   /workspace/data/v0.3_valid.jsonl \
+    --data-file   /workspace/data/v0.4_valid.jsonl \
     --output-file /workspace/output/predictions.jsonl
 """
 import argparse
@@ -23,6 +23,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 DEFAULT_MODEL = os.environ.get("BASE_MODEL_ID", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16")
 MAX_MEMORY = {0: "115GiB"}
 
+# Must match SYSTEM_PROMPT in train_lora.py — single source of truth is there.
+# Kept in sync manually; if changing, update both files.
+_SYSTEM_PROMPT = "Solve the problem step by step. Put your final answer in \\boxed{}."
+
 
 def _get_mamba_cache_cls(model):
     mod = sys.modules.get(model.__class__.__module__)
@@ -32,10 +36,8 @@ def _get_mamba_cache_cls(model):
 
 
 def build_prompt(row: dict, tokenizer) -> str:
-    system = row.get(
-        "system",
-        "You are a careful reasoning model. Solve the problem step by step and end with Final answer: \\boxed{...}.",
-    )
+    # Use `or` so empty "system" fields fall back to the training prompt.
+    system = row.get("system") or _SYSTEM_PROMPT
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": row["prompt"]},

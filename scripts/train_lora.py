@@ -18,6 +18,10 @@ from trl import SFTConfig, SFTTrainer
 
 DEFAULT_MODEL = os.environ.get("BASE_MODEL_ID", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16")
 
+# Single source of truth for the system prompt used at both training and inference.
+# Kept short so it doesn't crowd the context at seq_len=8192.
+SYSTEM_PROMPT = "Solve the problem step by step. Put your final answer in \\boxed{}."
+
 
 def _make_cache_dropper(interval: float = 20.0) -> threading.Event:
     """Start a daemon thread that drops Linux page cache every `interval` seconds.
@@ -86,10 +90,9 @@ def _make_cache_dropper(interval: float = 20.0) -> threading.Event:
 
 
 def format_example(example, tokenizer):
-    system = example.get(
-        "system",
-        "You are a careful reasoning model. Solve the problem step by step and end with Final answer: \\boxed{...}.",
-    )
+    # Use `or` so an empty string (huikang corpus has "system":"") falls back
+    # to the canonical prompt — same value infer_lora.py uses at inference time.
+    system = example.get("system") or SYSTEM_PROMPT
     user = example["prompt"]
     answer = example["response"]
     # Corpus extraction strips the <think> prefix (it was in the masked/no-loss region).

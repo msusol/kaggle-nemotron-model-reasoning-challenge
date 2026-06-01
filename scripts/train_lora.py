@@ -125,7 +125,7 @@ def main():
     ap.add_argument("--learning-rate", type=float, default=2e-4)
     ap.add_argument("--num-epochs", type=float, default=1.0)
     ap.add_argument("--lora-r", type=int, default=32)
-    ap.add_argument("--lora-alpha", type=int, default=64)
+    ap.add_argument("--lora-alpha", type=int, default=32)
     ap.add_argument("--lora-dropout", type=float, default=0.05)
     ap.add_argument("--warmup-ratio", type=float, default=0.03)
     ap.add_argument("--early-stopping-patience", type=int, default=0,

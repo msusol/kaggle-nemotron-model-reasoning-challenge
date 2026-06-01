@@ -1,4 +1,5 @@
 import argparse
+import functools
 import math
 import os
 import sys
@@ -69,6 +70,14 @@ def _make_cache_dropper(interval: float = 20.0) -> threading.Event:
                     fh.write("3\n")
             except OSError:
                 pass  # non-privileged container — skip silently
+            # Return freed CUDA blocks to the driver. During from_pretrained,
+            # temporary dtype-conversion tensors accumulate as reserved-but-freed
+            # allocator cache (~41 GB at 80% load) and crowd out the remaining
+            # weight shards. empty_cache() releases them back to the OS pool.
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
             print(f"[dropper] {_mem_stats()}", flush=True)
 
     t = threading.Thread(target=_loop, daemon=True, name="cache-dropper")
@@ -181,6 +190,28 @@ def main():
     )
     model = get_peft_model(model, peft_config, autocast_adapter_dtype=False)
 
+    # Enable gradient checkpointing via NemotronH's native GradientCheckpointingLayer mechanism.
+    # Every NemotronHBlock inherits GradientCheckpointingLayer, which checks
+    # self.gradient_checkpointing in __call__ and recomputes the block during backward
+    # instead of storing activations — reducing activation memory from ~20–40 GB to ~1–5 GB
+    # at seq_len=8192.
+    #
+    # The standard gradient_checkpointing_enable() path is blocked by
+    # NemotronHForCausalLM.supports_gradient_checkpointing=False, but
+    # _set_gradient_checkpointing() is fully implemented and walks all modules that have
+    # the gradient_checkpointing attribute, bypassing the flag guard entirely.
+    # SFTConfig must keep gradient_checkpointing=False so SFTTrainer does not try to
+    # call gradient_checkpointing_enable() again and raise the ValueError.
+    _gc_func = functools.partial(torch.utils.checkpoint.checkpoint, use_reentrant=False)
+    try:
+        model.base_model.model._set_gradient_checkpointing(
+            enable=True, gradient_checkpointing_func=_gc_func
+        )
+        model.enable_input_require_grads()
+        print("Gradient checkpointing enabled (NemotronH GradientCheckpointingLayer, use_reentrant=False)")
+    except Exception as _e:
+        print(f"Warning: gradient checkpointing unavailable: {_e}")
+
     data_files = {"train": args.train_file}
     if args.valid_file:
         data_files["validation"] = args.valid_file
@@ -215,10 +246,10 @@ def main():
         lr_scheduler_type="cosine",
         max_grad_norm=1.0,
         max_seq_length=args.max_seq_length,
-        # NemotronHForCausalLM does not implement gradient_checkpointing_enable();
-        # SFTTrainer raises ValueError if gradient_checkpointing=True.
-        # Empirically, seq_len=8192 + frozen base + LoRA fits the 130 GB unified
-        # pool without GC (confirmed: run 235341 trained 5 steps at ~33 s/step).
+        # Keep False: GC is enabled manually above via _set_gradient_checkpointing()
+        # on the NemotronH blocks. Setting True here would cause SFTTrainer to call
+        # gradient_checkpointing_enable() which checks supports_gradient_checkpointing=False
+        # and raises ValueError.
         gradient_checkpointing=False,
     )
 

@@ -96,6 +96,31 @@ Key changes vs v0.3: `max_seq_length=8192`, expanded `target_modules` (+ q/k/v/o
 
 - [x] Write `scripts/extract_huikang_corpus.py` — decode pre-tokenized corpus → JSONL
 - [x] Run extraction → `data/v0.4_train.jsonl` + `data/v0.4_valid.jsonl`; verify type distribution
+## OOM fix — CUDA allocator cache during loading ✓
+
+`from_pretrained` accumulates ~41 GB of freed-but-cached CUDA blocks (temp tensors
+from dtype conversion); dropper's `drop_caches` had no effect on these. Fixed by
+adding `torch.cuda.empty_cache()` to the dropper thread (2026-05-31).
+See `docs/investigate/v0.4-oom-loading.md` and `docs/adr/0003-dropper-empty-cache.md`.
+
+- [x] Add `torch.cuda.empty_cache()` to `_make_cache_dropper._loop()` in `train_lora.py`
+- [x] Document finding with memory log in `docs/investigate/v0.4-oom-loading.md`
+- [x] Document decision in `docs/adr/0003-dropper-empty-cache.md`
+
+## OOM fix — training activation memory at seq_len=8192
+
+After the loading fix, model loads to 64.4 GB with only ~4 GB CUDA free. Training
+forward/backward at seq_len=8192 needs ~20–40 GB activation memory → OOM at step 37.
+Fix: enable NemotronH's native gradient checkpointing via `_set_gradient_checkpointing()`
+directly, bypassing the `supports_gradient_checkpointing=False` guard. Every NemotronHBlock
+inherits `GradientCheckpointingLayer` which has full GC support. Blocked only by the class
+flag, not by missing implementation. See `docs/investigate/v0.4-oom-training.md`.
+
+- [x] Discover `GradientCheckpointingLayer` base class in NemotronH (transformers 5.5.3)
+- [x] Confirm `_set_gradient_checkpointing()` is fully implemented on `NemotronHModel`
+- [x] Enable GC via `model.base_model.model._set_gradient_checkpointing(enable=True, ...)` in `train_lora.py`
+- [x] Document in `docs/investigate/v0.4-oom-training.md`
+
 - [ ] Run `RUN_NAME=huikang_v4 bash scripts/run_train.sh`
 - [ ] Validate, package, submit; record in leaderboard
 - [ ] Link `samvalladares/huikang-nemotron-artifacts` from prize eligibility notebook (Rule 6)

@@ -79,7 +79,8 @@ See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full 
 │   ├── images/
 │   │   ├── dgx-spark-dashboard.png         # DGX Spark CPU/GPU usage during training
 │   │   ├── training_comparison_v01_v02.png # v0.1 vs v0.2 training curves
-│   │   └── training_v03.png                # v0.3 training curves
+│   │   ├── training_v03.png                # v0.3 training curves
+│   │   └── training_v04.png                # v0.4 training curves (loss, token acc, LR)
 │   ├── investigate/
 │   │   ├── dataset-comparison.md        # raw competition data vs peer CoT dataset
 │   │   ├── v0.3-training-analysis.md    # v0.3 training metrics and analysis
@@ -297,3 +298,4 @@ See [`docs/plans/leaderboard.md`](docs/plans/leaderboard.md) for the full run hi
 
 ![Training comparison v0.1-baseline vs v0.2-cot](docs/images/training_comparison_v01_v02.png)
 ![v0.3 training curves](docs/images/training_v03.png)
+![v0.4 training curves — loss, token accuracy, LR schedule](docs/images/training_v04.png)

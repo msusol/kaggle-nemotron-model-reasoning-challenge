@@ -72,7 +72,7 @@ See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full 
 ├── data/                            # large data files — gitignored, generate locally (see below)
 │   ├── v0.4_train.jsonl     # 15,159 examples — huikang corpus (run scripts/run_extract_huikang_corpus.sh)
 │   ├── v0.4_valid.jsonl     # 820 examples   — huikang corpus validation split
-│   ├── nemo_train.jsonl     # 15,159 examples — NeMo-format version (run scripts/run_prepare_nemo_dataset.sh)
+│   ├── nemo_train.jsonl     # 15,159 examples — NeMo-format (published on Kaggle, see below)
 │   ├── nemo_valid.jsonl     # 820 examples   — NeMo-format validation split
 │   └── nemo_dataset/        # Kaggle dataset card (README.md + dataset-metadata.json — committed)
 ├── docs/
@@ -171,6 +171,10 @@ with exhaustive algorithmic CoT traces covering both the training set and the fu
 bash scripts/run_extract_huikang_corpus.sh   # → data/v0.4_train.jsonl + data/v0.4_valid.jsonl
 bash scripts/run_prepare_nemo_dataset.sh     # → data/nemo_dataset/nemo_train.jsonl + nemo_valid.jsonl
 ```
+
+The NeMo-format dataset is also published on Kaggle and can be used directly without running
+the conversion script:
+**[gdataranger/huikang-nemotron-nemo-sft-r32](https://www.kaggle.com/datasets/gdataranger/huikang-nemotron-nemo-sft-r32)**
 
 To build the v0.4 training data, download the corpus and run the extraction script:
 

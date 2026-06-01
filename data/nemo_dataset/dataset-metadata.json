@@ -12,7 +12,7 @@
     "pytorch"
   ],
   "collaborators": [
-    {"username": "huikang",       "role": "writer"},
-    {"username": "samvalladares", "role": "writer"}
+    {"username": "huikang",       "role": "reader"},
+    {"username": "samvalladares", "role": "reader"}
   ]
 }

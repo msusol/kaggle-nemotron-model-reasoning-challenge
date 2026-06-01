@@ -2,18 +2,17 @@
   "title": "Huikang Nemotron NeMo SFT Corpus (r=32)",
   "id": "gdataranger/huikang-nemotron-nemo-sft-r32",
   "subtitle": "NeMo SFT format: 15,979 reasoning examples, 14 categories, r=32",
-  "description": "Pre-tokenized supervised fine-tuning corpus for NVIDIA Nemotron-3 Nano 30B (A3B), formatted for the NVIDIA NeMo training pipeline. Derived from Tong Hui Kang's huikang artifacts (published by Sam Valladares on Kaggle) — the same corpus behind the 0.85 competition reference notebook.\n\nEach line is a JSON object with `input_ids` (full token ID sequence) and `labels` (-100 for the system+user prompt region, real token IDs for the assistant response region). All 15,979 examples fit within 8,192 tokens. Covers all 14 competition problem categories including 8 test-only types absent from the public train.csv.\n\nSee the README for full schema documentation, sequence length statistics, NeMo config snippet, and complete provenance/attribution.",
+  "description": "Pre-tokenized supervised fine-tuning corpus for NVIDIA Nemotron-3 Nano 30B (A3B), formatted for the NVIDIA NeMo training pipeline. Derived from Tong Hui Kang's huikang artifacts (published by Sam Valladares on Kaggle) — the same corpus behind the 0.85 competition reference notebook.\n\nEach line is a JSON object with `input_ids` (full token ID sequence) and `labels` (-100 for the system+user prompt region, real token IDs for the assistant response region). All 15,979 examples fit within 8,192 tokens. Covers all 14 competition problem categories including 8 test-only types absent from the public train.csv.\n\nSee the README for full schema documentation, sequence length statistics, NeMo config snippet, and complete provenance/attribution.\n\n## Sources\n\n- **Tong Hui Kang** (`huikang`) — original corpus author; deterministic solver framework, Tinker training pipeline, 0.85 reference notebook. Discussion: https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/687961\n- **Sam Valladares** (`samvalladares`) — published source artifacts: https://www.kaggle.com/datasets/samvalladares/huikang-nemotron-artifacts\n- **Conversion code**: https://github.com/msusol/kaggle-nemotron-model-reasoning-challenge\n- **Competition**: https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge",
   "isPrivate": false,
   "licenses": [{"name": "CC0-1.0"}],
   "keywords": [
     "nlp",
     "deep learning",
-    "reasoning",
-    "nvidia nemotron",
-    "nemo",
-    "lora",
-    "sft",
-    "pre-tokenized",
-    "competition"
+    "text data",
+    "pytorch"
+  ],
+  "collaborators": [
+    {"username": "huikang",       "role": "writer"},
+    {"username": "samvalladares", "role": "writer"}
   ]
 }

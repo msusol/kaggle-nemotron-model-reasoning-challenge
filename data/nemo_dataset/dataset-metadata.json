@@ -1,0 +1,18 @@
+{
+  "title": "Huikang Nemotron — NeMo SFT Pre-tokenized Corpus (r=32)",
+  "id": "msusol/huikang-nemotron-nemo-sft-r32",
+  "licenses": [{"name": "CC0-1.0"}],
+  "keywords": [
+    "nlp",
+    "deep learning",
+    "text data",
+    "reasoning",
+    "nvidia nemotron",
+    "nemo",
+    "lora",
+    "sft",
+    "pre-tokenized"
+  ],
+  "collaborators": [],
+  "data": []
+}

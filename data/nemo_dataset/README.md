@@ -227,7 +227,7 @@ CC0-1.0, making this work accessible and compliant with competition Rule 6.
 |---|---|
 | What was added | NeMo SFT format conversion (`input_ids` / `labels` integer arrays) |
 | Conversion script | `scripts/prepare_nemo_dataset.py` in [msusol/kaggle-nemotron-model-reasoning-challenge](https://github.com/msusol/kaggle-nemotron-model-reasoning-challenge) |
-| Kaggle slug | `msusol/huikang-nemotron-nemo-sft-r32` |
+| Kaggle slug | `gdataranger/huikang-nemotron-nemo-sft-r32` |
 | Tokenizer | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16` |
 | Train/valid split | Deterministic 95/5 MD5 hash on `problem_id` — identical to the text-format JSONL split |
 | License | CC0-1.0 (inherited from source) |

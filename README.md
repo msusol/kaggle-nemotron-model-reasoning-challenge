@@ -69,12 +69,12 @@ See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full 
 ├── .clinerules/                         # 17 rules (framework 01-12, project-specific 13-17)
 ├── configs/
 │   └── nemotron.yaml                # training hyperparameters
-├── data/                            # versioned datasets
-│   ├── v0.1_train.jsonl     # 9,500 examples — raw competition data (prompt + \boxed{answer})
-│   ├── v0.1_train.csv       # original competition CSV (reconstructed from kagglehub cache)
-│   ├── v0.3_train.jsonl     # 2,510 examples — correctness-filtered CoT (kishanvavdara)
-│   ├── v0.3_valid.jsonl     # 279 examples — correctness-filtered CoT validation
-│   └── v0.3_valid_labels.jsonl  # {"id","answer"} pairs for validate_metric.py
+├── data/                            # large data files — gitignored, generate locally (see below)
+│   ├── v0.4_train.jsonl     # 15,159 examples — huikang corpus (run scripts/run_extract_huikang_corpus.sh)
+│   ├── v0.4_valid.jsonl     # 820 examples   — huikang corpus validation split
+│   ├── nemo_train.jsonl     # 15,159 examples — NeMo-format version (run scripts/run_prepare_nemo_dataset.sh)
+│   ├── nemo_valid.jsonl     # 820 examples   — NeMo-format validation split
+│   └── nemo_dataset/        # Kaggle dataset card (README.md + dataset-metadata.json — committed)
 ├── docs/
 │   ├── images/
 │   │   ├── dgx-spark-dashboard.png         # DGX Spark CPU/GPU usage during training
@@ -160,12 +160,17 @@ build (previously `-j$(nproc)` = 72 jobs on Grace, which OOM'd the DGX Spark).
 
 ### 2. Training data
 
-`data/v0.3_train.jsonl` (2,510 ex) and `data/v0.1_train.jsonl` (9,500 ex) are committed.
-For **v0.4**, the training data is the `samvalladares/huikang-nemotron-artifacts` corpus —
-15,979 problems with exhaustive algorithmic CoT traces covering both the training set and the
-test set (which has 8+ problem categories not present in `train.csv`). See
-[`docs/investigate/huikang-pipeline.md`](docs/investigate/huikang-pipeline.md) for a full
-analysis of the corpus and why it achieves 0.85.
+All JSONL files under `data/` are gitignored (too large for git). Generate them locally:
+
+**v0.4 training data** — `samvalladares/huikang-nemotron-artifacts` corpus, 15,979 problems
+with exhaustive algorithmic CoT traces covering both the training set and the full test set
+(which has 8+ categories not present in `train.csv`). See
+[`docs/investigate/huikang-pipeline.md`](docs/investigate/huikang-pipeline.md) for analysis.
+
+```bash
+bash scripts/run_extract_huikang_corpus.sh   # → data/v0.4_train.jsonl + data/v0.4_valid.jsonl
+bash scripts/run_prepare_nemo_dataset.sh     # → data/nemo_dataset/nemo_train.jsonl + nemo_valid.jsonl
+```
 
 To build the v0.4 training data, download the corpus and run the extraction script:
 

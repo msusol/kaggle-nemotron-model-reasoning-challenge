@@ -10,6 +10,8 @@ data/v0.4_train.jsonl
 data/v0.4_valid.jsonl
 data/nemo_train.jsonl
 data/nemo_valid.jsonl
+data/nemo_dataset/nemo_train.jsonl
+data/nemo_dataset/nemo_valid.jsonl
 data/v0.1_train.csv
 .paused_containers
 .idea/

@@ -29,5 +29,5 @@ docker run --rm \
   nemotron-gb10:latest \
   python scripts/validate_metric.py \
     --predictions "${PREDICTIONS}" \
-    --labels      /workspace/data/v0.3_valid_labels.jsonl \
+    --labels      /workspace/data/v0.4_valid_labels.jsonl \
     "${PASSTHROUGH[@]}"

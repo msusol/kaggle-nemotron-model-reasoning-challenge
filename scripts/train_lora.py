@@ -141,8 +141,17 @@ def main():
             "Run without --use-4bit; the GB10 has sufficient memory for BF16."
         )
 
-    # Suppress FutureWarning from transformers NemotronH causal-mask internals
-    # (input_embeds → inputs_embeds rename; fires every forward pass, not our code).
+    # Suppress noisy warnings that are not actionable.
+    # 1. NemotronH causal-mask internals: input_embeds rename fires every forward pass.
+    # 2. PEFT save_embedding_layers: fires if any target_module is classed as an
+    #    embedding layer (e.g. lm_head); lm_head is excluded from target_modules but
+    #    guard here in case it is re-added.
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*save_embedding_layers.*",
+        category=UserWarning,
+        module=r"peft\..*",
+    )
     warnings.filterwarnings(
         "ignore",
         message=r".*input_embeds.*deprecated.*",
@@ -186,7 +195,10 @@ def main():
         lora_dropout=args.lora_dropout,
         bias="none",
         task_type="CAUSAL_LM",
-        target_modules=r".*\.(q_proj|k_proj|v_proj|o_proj|in_proj|out_proj|up_proj|down_proj|lm_head)$",
+        # lm_head excluded: PEFT classifies it as an embedding layer, sets
+        # save_embedding_layers=True, and bloats the adapter by ~4 MB.
+        # Attention + Mamba + MoE FFN projections cover all trainable linears.
+        target_modules=r".*\.(q_proj|k_proj|v_proj|o_proj|in_proj|out_proj|up_proj|down_proj)$",
     )
     model = get_peft_model(model, peft_config, autocast_adapter_dtype=False)
 

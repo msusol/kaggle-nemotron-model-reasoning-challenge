@@ -1,7 +1,7 @@
 {
   "title": "Huikang Nemotron NeMo SFT Corpus (r=32)",
   "id": "gdataranger/huikang-nemotron-nemo-sft-r32",
-  "subtitle": "Pre-tokenized SFT corpus for NVIDIA NeMo — 15,979 reasoning examples across 14 categories, derived from samvalladares/huikang-nemotron-artifacts (r=32)",
+  "subtitle": "NeMo SFT format: 15,979 reasoning examples, 14 categories, r=32",
   "description": "Pre-tokenized supervised fine-tuning corpus for NVIDIA Nemotron-3 Nano 30B (A3B), formatted for the NVIDIA NeMo training pipeline. Derived from Tong Hui Kang's huikang artifacts (published by Sam Valladares on Kaggle) — the same corpus behind the 0.85 competition reference notebook.\n\nEach line is a JSON object with `input_ids` (full token ID sequence) and `labels` (-100 for the system+user prompt region, real token IDs for the assistant response region). All 15,979 examples fit within 8,192 tokens. Covers all 14 competition problem categories including 8 test-only types absent from the public train.csv.\n\nSee the README for full schema documentation, sequence length statistics, NeMo config snippet, and complete provenance/attribution.",
   "isPrivate": false,
   "licenses": [{"name": "CC0-1.0"}],

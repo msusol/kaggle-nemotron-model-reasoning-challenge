@@ -55,6 +55,11 @@ Each line is a JSON object with two fields:
   `-100` (no loss computed); the assistant response region contains the real token IDs
   (loss computed here). Standard SFT masking convention.
 
+> **System prompt**: the huikang source corpus uses an empty system prompt (`"system": ""`).
+> The baked-in masked tokens therefore represent an empty system field. When running
+> inference with a NeMo-trained model from this dataset, use an empty system prompt
+> (or omit it) to stay in-distribution.
+
 ---
 
 ## Sequence structure
@@ -157,6 +162,36 @@ print(tok.decode(resp_ids))
 
 ---
 
+## Scoring with valid_labels.jsonl
+
+`valid_labels.jsonl` contains the ground-truth answers for the 820 validation examples,
+one JSON object per line: `{"id": "<problem_id>", "answer": "<boxed_answer>"}`.
+
+Use it to score model outputs that follow the `{"id": ..., "output": "..."}` format:
+
+```python
+import json, re
+
+BOXED = re.compile(r"\\boxed\{([^{}]+)\}")
+
+def extract(text):
+    hits = BOXED.findall(text)
+    return hits[-1].strip() if hits else ""   # last \boxed{} = final answer
+
+labels = {r["id"]: r["answer"]
+          for r in map(json.loads, open("valid_labels.jsonl"))}
+preds  = {r["id"]: extract(r["output"])
+          for r in map(json.loads, open("predictions.jsonl"))}
+
+correct = sum(labels[i] == preds.get(i, "") for i in labels)
+print(f"{correct}/{len(labels)}  {100*correct/len(labels):.1f}%")
+```
+
+> **Note:** always take the **last** `\boxed{}` — the CoT chain may contain intermediate
+> `\boxed{–}` placeholders before the real answer.
+
+---
+
 ## Using with NVIDIA NeMo
 
 Configure `nemotron_sft_config.yaml` to point at these files:
@@ -175,9 +210,10 @@ model:
     peft_scheme: "lora"
     lora_tuning:
       r: 32
-      adapter_alpha: 64
+      adapter_alpha: 32          # match lora_alpha=32 used in PEFT reference training
       lora_dropout: 0.05
-      target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "in_proj", "out_proj"]
+      # Attention + Mamba in_proj/out_proj + MoE FFN up_proj/down_proj
+      target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "in_proj", "out_proj", "up_proj", "down_proj"]
 ```
 
 NeMo reads the integer arrays directly without re-tokenizing — no tokenizer load needed

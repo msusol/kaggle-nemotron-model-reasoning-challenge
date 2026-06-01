@@ -16,15 +16,16 @@ if [ ! -f "$ADAPTER_DIR/adapter_model.safetensors" ] && [ ! -f "$ADAPTER_DIR/ada
 fi
 
 rm -f "$ZIP_PATH"
+# Build file list from what actually exists in the adapter dir.
+# special_tokens_map.json is absent from Nemotron-H adapters; zip it only if present.
+FILES=(adapter_config.json adapter_model.safetensors tokenizer.json tokenizer_config.json chat_template.jinja)
+OPTIONAL=(special_tokens_map.json)
+for f in "${OPTIONAL[@]}"; do
+  [[ -f "$ADAPTER_DIR/$f" ]] && FILES+=("$f")
+done
 (
   cd "$ADAPTER_DIR"
-  zip "$ZIP_PATH" \
-    adapter_config.json \
-    adapter_model.safetensors \
-    tokenizer.json \
-    tokenizer_config.json \
-    special_tokens_map.json \
-    chat_template.jinja 2>/dev/null || true
+  zip "$ZIP_PATH" "${FILES[@]}"
 )
 
 echo "Created $ZIP_PATH"

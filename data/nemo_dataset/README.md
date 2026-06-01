@@ -19,6 +19,26 @@ competition.
 | `nemo_train.jsonl` | 15,159 | Training split (95%) |
 | `nemo_valid.jsonl` | 820 | Validation split (5%) |
 
+### Why 95/5 and not the conventional 80/20
+
+The 5% validation split is intentional. For this specific dataset and training regime,
+a larger held-out set would waste training coverage without improving evaluation quality:
+
+- **820 examples is sufficient for the purpose.** The validation set monitors that
+  training loss is decreasing — it is a sanity-check signal, not a model selection
+  gate. 820 examples does this reliably.
+- **1-epoch SFT cannot overfit.** Each example is seen exactly once. A large validation
+  set has nothing additional to detect.
+- **The competition leaderboard is the real evaluation.** Local validation accuracy is
+  a proxy; the final metric is the Kaggle public score. Over-investing in held-out size
+  reduces training coverage without improving the score that matters.
+- **Coverage over rare categories.** The smallest category (`cryptarithm_deduce`) has
+  125 examples total. At 80/20 only ~100 would train; at 95/5 ~119 train. Every
+  example pulled from training on rare categories directly hurts coverage of those
+  test types.
+- **Consistent with the 0.85 reference.** Tong Hui Kang's reference pipeline trained
+  on the full corpus with a small held-out set at 1 epoch. This split matches that pattern.
+
 Each line is a JSON object with two fields:
 
 ```json

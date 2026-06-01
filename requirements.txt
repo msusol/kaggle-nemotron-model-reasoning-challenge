@@ -1,0 +1,27 @@
+# IDE / dev environment — for type checking and autocompletion only.
+# Actual training runs inside the nemotron-gb10 Docker container (Dockerfile.gb10),
+# which provides GPU-compiled packages (mamba-ssm, causal-conv1d, bitsandbytes)
+# that cannot be installed outside that container.
+#
+# Install into the shared Kaggle venv:
+#   pip install -r requirements.txt
+#
+# torch is installed CPU-only here (no CUDA needed for IDE support):
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+# Config parsing (used by scripts/load_config.sh)
+PyYAML>=6.0
+
+# Training stack
+torch>=2.1
+transformers>=4.40
+peft>=0.10
+trl>=0.8
+datasets>=2.18
+accelerate>=0.28
+
+# Inference / scoring
+openai>=1.0
+
+# Utilities
+tqdm>=4.66

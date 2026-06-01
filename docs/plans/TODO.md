@@ -121,8 +121,8 @@ flag, not by missing implementation. See `docs/investigate/v0.4-oom-training.md`
 - [x] Enable GC via `model.base_model.model._set_gradient_checkpointing(enable=True, ...)` in `train_lora.py`
 - [x] Document in `docs/investigate/v0.4-oom-training.md`
 
-- [ ] Run `RUN_NAME=huikang_v4 bash scripts/run_train.sh`
-- [ ] Validate, package, submit; record in leaderboard
+- [x] Run `RUN_NAME=huikang_v4 bash scripts/run_train.sh` — completed 2026-06-01, 948 steps / 14.4 h; train_loss=0.2217, eval_loss=0.2092, eval_token_acc=94.47%; adapter at `output/adapter_huikang_v4_20260531_191344`
+- [ ] Validate (boxed-answer acc via `validate_metric.py`), package (`submission.zip` ready), submit to Kaggle; record Kaggle score in leaderboard
 - [ ] Link `samvalladares/huikang-nemotron-artifacts` from prize eligibility notebook (Rule 6)
 
 ## Phase 6 — v0.5 (GRPO self-improvement)

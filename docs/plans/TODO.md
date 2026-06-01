@@ -122,8 +122,28 @@ flag, not by missing implementation. See `docs/investigate/v0.4-oom-training.md`
 - [x] Document in `docs/investigate/v0.4-oom-training.md`
 
 - [x] Run `RUN_NAME=huikang_v4 bash scripts/run_train.sh` — completed 2026-06-01, 948 steps / 14.4 h; train_loss=0.2217, eval_loss=0.2092, eval_token_acc=94.47%; adapter at `output/adapter_huikang_v4_20260531_191344`
-- [ ] Validate (boxed-answer acc via `validate_metric.py`), package (`submission.zip` ready), submit to Kaggle; record Kaggle score in leaderboard
+- [x] Package (`submission.zip` ready at `output/submission/submission.zip`) and submit to Kaggle — score **0.49** (regression vs 0.57 baseline)
+- [ ] Validate boxed-answer acc via `validate_metric.py` once inference completes (inference job running against v0.4_valid.jsonl)
 - [ ] Link `samvalladares/huikang-nemotron-artifacts` from prize eligibility notebook (Rule 6)
+
+## v0.4 regression fixes — apply before next SFT or v0.5 GRPO
+
+See `docs/investigate/v0.4-kaggle-regression.md` for full root cause analysis.
+
+Two confirmed bugs caused the 0.49 regression despite 94.47% token accuracy:
+
+1. **Empty system prompt during training** — huikang `"system": ""` causes `dict.get("system", default)`
+   to return `""`, so training used no system prompt. Inference injects a non-empty one → OOD.
+   Fix: use `example.get("system") or "..."` in `format_example` to treat empty as missing.
+
+2. **`\boxed{–}` placeholder in thinking chain** — huikang responses embed `\boxed{–}` inside
+   `<think>` before the real answer. If Kaggle scorer takes first `\boxed{}`, every answer is `–`.
+   Fix: strip placeholder in `scripts/extract_huikang_corpus.py` before writing JSONL.
+
+- [ ] Fix `format_example` in `train_lora.py`: `example.get("system") or DEFAULT_SYSTEM`
+- [ ] Fix `infer_lora.py`: use same system prompt as training
+- [ ] Fix `extract_huikang_corpus.py`: strip `\boxed{–}` placeholder pattern from responses
+- [ ] Re-run extraction → retrain → resubmit to confirm regression is fixed
 
 ## Phase 6 — v0.5 (GRPO self-improvement)
 

@@ -435,3 +435,133 @@ and requires porting work. Use Modal only as a fallback.
   RTX PRO 6000 at $3.03/hr.
 - If a v0.5 GRPO run is expected to take > 48 hours on GB10, it may be worth paying
   for Modal to stay within competition deadline.
+
+---
+
+## 8. Dataset format audit — v0.4_train.jsonl vs 0.87 training data
+
+### Context
+
+Before re-running training with the regression fixes, we needed to verify exactly what
+format issues exist in `data/v0.4_train.jsonl` and how they compare to what the 0.87
+notebook uses.
+
+### Investigation Checklist
+
+- [x] Sample raw rows from `v0.4_train.jsonl` — inspect system, prompt, response fields
+- [x] Audit all 15,159 rows by category: count missing `\boxed{}`, `\boxed{–}` placeholders, missing `</think>`
+- [x] Read `scripts/extract_huikang_corpus.py` — understand how corpus was decoded
+- [x] Read `scripts/train_lora.py` `format_example` — verify system prompt fix is applied
+- [x] Read `scripts/validate_metric.py` `extract_answer` — understand local scorer behaviour
+- [x] Check `data/test.csv` prompt format vs training prompt format
+- [x] Read `docs/investigate/v0.4-kaggle-regression.md` for known issues
+
+### Findings
+
+#### Three distinct format issues identified across all 15,159 training rows
+
+**Issue 1 — Empty system field (all 15,159 rows)**
+
+Every row has `"system": ""`. This is the root cause of the v0.4 regression (score 0.49):
+the model trained without any system prompt, but inference injected an out-of-distribution
+one. The fix (`example.get("system") or SYSTEM_PROMPT`) is already in `train_lora.py`
+but has not yet been used in a retrained submission.
+
+**Issue 2 — `\boxed{–}` placeholder in 9 categories (8,596 rows)**
+
+Rows across bit_manipulation, cipher, gravity, numeral, unit_conversion,
+cryptarithm_deduce, cryptarithm_guess, equation_numeric_deduce, equation_numeric_guess
+ALL contain this template artefact inside `<think>`:
+
+```
+I will now return the answer in \boxed{}
+The answer in \boxed{–} is \boxed{10010111}
+</think>
+\boxed{10010111}
+```
+
+`\boxed{–}` is a template placeholder left by the Tinker solver. The real answer
+`\boxed{10010111}` appears twice: once inside `<think>` (after the dash) and once
+cleanly after `</think>`. Our local `validate_metric.py` uses `boxed[-1]` (last match),
+so it correctly extracts `10010111` and is unaffected. The Kaggle scorer behaviour is
+unknown — if it takes `boxed[0]` it would score `–` for every problem in these categories.
+
+**Issue 3 — No `\boxed{}` at all in 5 augmenter categories (8,046 rows, ~53%)**
+
+| Category | Rows | Has `\boxed{}`? | Response ending |
+|---|---|---|---|
+| `matching` | 4,316 | ✗ | `Best: 3 4 5 6 7 0 1 2: 8\n</think>` |
+| `splitting` | 1,421 | ✗ | `99 【/】 -> 【/】\n</think>` |
+| `concatenation` | 1,422 | ✗ | ends `</think>` |
+| `spelling` | 601 | ✗ | ends `</think>` |
+| `lstrip` | 286 | ✗ | ends `</think>` |
+
+These responses end with `</think>` and provide no boxed final answer. The model is
+trained to output multi-line structured answers (e.g. the full split table for splitting,
+the best-match sequence for matching) with NO boxed wrapper. Our system prompt
+"Put your final answer in `\boxed{}`" directly contradicts what the training data shows
+for these 8,046 rows.
+
+Our local `validate_metric.py` falls back to `last number → last word` when no `\boxed{}`
+is found. For a matching response the last token before `</think>` would be a count
+integer (`8`), not the sequence answer — so local scoring of these categories would be
+wrong regardless.
+
+**Issue 4 — Prompt `\boxed{}` instruction present in training but absent in test.csv**
+
+Training prompts for the 9 boxed categories end with:
+```
+Please put your final answer inside `\boxed{}`. For example: `\boxed{your answer}`
+```
+
+The sample `test.csv` (3 rows, bit_manipulation) does NOT include this instruction:
+```
+Now, determine the output for: 00110100
+```
+
+(End of prompt.) The system prompt compensates at inference time; this is not a blocker
+but means the model sees two different prompt styles for the same task.
+
+#### How the 0.87 notebook handles these issues
+
+The 0.87 notebook almost certainly trains with `system: ""` and infers with `system: ""`
+(empty throughout). The `\boxed{}` output for the 9 boxed categories comes from the
+prompt instruction, not the system field. For the 5 augmenter categories, the model
+outputs the structured non-boxed format — and the competition scorer presumably accepts
+this format or the actual test prompts for those categories include a `\boxed{}`
+instruction that we don't have in our training data.
+
+Our approach diverges by injecting a system prompt at both train and infer time. This
+is correct in isolation, but it creates a contradiction for the 8,046 augmenter-category
+rows where training data never demonstrates `\boxed{}` output.
+
+#### Summary table
+
+| Issue | Rows affected | Impact on local score | Impact on Kaggle score | Fix |
+|---|---|---|---|---|
+| Empty system (trained ≠ inferred) | 15,159 | None (same env) | **Primary v0.4 regression** | `example.get("system") or SYSTEM_PROMPT` — in code ✅ |
+| `\boxed{–}` placeholder | 8,596 | None (`boxed[-1]`) | Unknown — may score `–` | Strip from `extract_huikang_corpus.py` ⚠️ |
+| No `\boxed{}` for augmenter cats | 8,046 | Wrong (fallback to last number/word) | Unknown — scorer may parse structured format | Unclear — see follow-ups ⚠️ |
+| Prompt `\boxed{}` instruction vs test | 9 cats | None | Minor style mismatch | System prompt compensates ✅ |
+
+### Actions Taken
+
+None — read-only investigation.
+
+### Resolution
+
+**Resolved.** Three format issues documented. Issue 1 (system prompt) fix is in code.
+Issue 2 (`\boxed{–}`) and Issue 3 (no `\boxed{}` in augmenter categories) require data
+fixes before the next training run.
+
+### Follow-ups
+
+1. **Strip `\boxed{–}` in `extract_huikang_corpus.py`** — remove
+   `The answer in \boxed{–} is` from `parse_unmasked()` output, leaving only
+   `\boxed{actual_answer}` inside `<think>` and after `</think>`.
+2. **Investigate augmenter category answer format** — check whether the competition's
+   actual test prompts for matching/splitting/etc. include `\boxed{}` instructions
+   (not present in our training prompts). If yes, add the instruction to training prompts
+   on re-extraction. If no, the scorer parses structured output and the current format
+   may be intentionally correct.
+3. **Re-run extraction** after fixes 1 and 2, then retrain before v0.5 GRPO init.

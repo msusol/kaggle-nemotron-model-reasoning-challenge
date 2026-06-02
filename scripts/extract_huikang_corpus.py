@@ -55,6 +55,8 @@ def parse_unmasked(decoded: str) -> str:
     text = decoded
     if text.endswith(_IM_END):
         text = text[: -len(_IM_END)]
+    # Strip Tinker placeholder: "The answer in \boxed{–} is " leaves only \boxed{answer}
+    text = re.sub(r"The answer in \\boxed\{[–\-]\} is ", "", text)
     return text.rstrip()
 
 

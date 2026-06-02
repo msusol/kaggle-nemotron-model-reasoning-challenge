@@ -28,12 +28,14 @@ import argparse
 import json
 import sys
 
-SYSTEM_PROMPT = "Solve the problem step by step. Put your final answer in \\boxed{}."
 _IGNORE_INDEX = -100
 
 
 def build_messages(example: dict) -> list[dict]:
-    system = example.get("system") or SYSTEM_PROMPT
+    # Use empty system throughout — matches 0.87 training format. The \boxed{}
+    # instruction is in the user prompt for boxed categories; augmenter categories
+    # intentionally have no \boxed{} in prompt or response.
+    system = example.get("system", "")
     answer = example["response"]
     if not answer.startswith("<think>"):
         answer = "<think>\n" + answer

@@ -361,3 +361,77 @@ GRPO, not Tinker replication.
 2. If v0.4 ≥ 0.80: proceed directly to v0.5 GRPO per `docs/plans/v0.5-grpo-plan.md`.
 3. MoE weight tying is deferred — moderate quality impact, high engineering cost, and
    GRPO likely outperforms it anyway.
+
+---
+
+## 7. DGX Spark (GB10) vs RTX PRO 6000 — which is better for this competition?
+
+### Context
+
+Having established Modal.com as a viable fallback at $3.03/hr for the RTX PRO 6000,
+the question is whether the RTX PRO 6000 is actually a better training platform than
+the GB10 and worth paying for.
+
+### Investigation Checklist
+
+- [x] Fetch DGX Spark GB10 specs from nvidia.com/dgx-spark (memory, bandwidth, compute, TDP)
+- [x] Confirm RTX PRO 6000 architecture and VRAM (96 GB GDDR7, sm_120) — NVIDIA spec pages 404
+- [x] Estimate RTX PRO 6000 bandwidth from GDDR7 spec and known bus width
+- [x] Compare against our actual GB10 training times
+
+### Findings
+
+NVIDIA's RTX PRO 6000 spec pages returned 404 during investigation. GB10 specs confirmed
+from official NVIDIA DGX Spark product page. RTX PRO 6000 bandwidth is estimated from
+GDDR7 characteristics; VRAM confirmed at 96 GB from AnandTech article URL slug.
+
+| Spec | DGX Spark GB10 | RTX PRO 6000 Blackwell |
+|---|---|---|
+| Memory | **128 GB** LPDDR5x unified | 96 GB GDDR7 ECC |
+| Memory bandwidth | **273 GB/s** (confirmed) | ~672 GB/s (GDDR7, estimated) |
+| BF16 compute | ~67 TFLOPS (est.) | ~150 TFLOPS (est.) |
+| Architecture | Blackwell sm_120 | Blackwell sm_120 |
+| TDP | 140 W (chip) / 240 W (system) | ~300 W |
+| Cost | **$0/hr (owned)** | $3.03/hr on Modal |
+
+**RTX PRO 6000 is faster in wall-clock time.** GDDR7 bandwidth is ~2.5× that of the GB10's
+LPDDR5x unified memory. For LLM training, bandwidth is the primary bottleneck — loading
+weights on every forward/backward pass dominates the step time. Our v0.4 SFT run of 14.4
+hours on GB10 would likely take ~6–8 hours on RTX PRO 6000.
+
+**GB10 wins on memory capacity.** 128 GB vs 96 GB provides more headroom for GRPO
+generation (N=8 × 6144 tokens) without having to reduce the generation group size to N=4.
+
+**Both are identical in training quality.** Same Blackwell sm_120 architecture means
+identical CUDA kernel paths, numerics, and output.
+
+**For this competition, GB10 is the correct choice:**
+
+1. **Cost**: $0/hr vs $3.03/hr. At 14 hrs/run × multiple attempts (v0.4 regressions,
+   v0.5 GRPO), Modal costs accumulate to $100–$200+. Speed is irrelevant if the hardware
+   is free and finishes before the deadline.
+2. **Memory headroom**: 128 GB absorbs GRPO batch spikes that 96 GB cannot.
+3. **Already configured**: Docker image, GC patches, page-cache dropper, and preflight
+   scripts are tuned for GB10. Modal porting is ~2–3 hours of additional work.
+4. **Deadline pressure**: Faster iteration on working hardware beats faster hardware that
+   requires setup time.
+
+Modal RTX PRO 6000 is the right choice only if the GB10 becomes unavailable for an
+extended period (hardware failure, travel, etc.).
+
+### Actions Taken
+
+None — read-only investigation.
+
+### Resolution
+
+**Resolved.** GB10 is the correct primary training platform for this competition.
+RTX PRO 6000 on Modal is faster in wall-clock time (~2× speedup) but costs ~$43/run
+and requires porting work. Use Modal only as a fallback.
+
+### Follow-ups
+
+- If the GB10 is unavailable: set up the Modal adapter (see §6 follow-ups) and use
+  RTX PRO 6000 at $3.03/hr.
+- If a v0.5 GRPO run is expected to take > 48 hours on GB10, it may be worth paying
+  for Modal to stay within competition deadline.

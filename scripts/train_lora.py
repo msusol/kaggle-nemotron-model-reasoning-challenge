@@ -90,9 +90,10 @@ def _make_cache_dropper(interval: float = 20.0) -> threading.Event:
 
 
 def format_example(example, tokenizer):
-    # Use `or` so an empty string (huikang corpus has "system":"") falls back
-    # to the canonical prompt — same value infer_lora.py uses at inference time.
-    system = example.get("system") or SYSTEM_PROMPT
+    # Empty system throughout — matches 0.87 training format (Fix 4 Option A).
+    # \boxed{} instruction lives in user prompt for boxed categories; augmenter
+    # categories intentionally have no \boxed{} in prompt or response.
+    system = example.get("system", "")
     user = example["prompt"]
     answer = example["response"]
     # Corpus extraction strips the <think> prefix (it was in the masked/no-loss region).

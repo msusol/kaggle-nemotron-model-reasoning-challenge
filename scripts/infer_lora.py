@@ -23,11 +23,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 DEFAULT_MODEL = os.environ.get("BASE_MODEL_ID", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16")
 MAX_MEMORY = {0: "115GiB"}
 
-# Must match SYSTEM_PROMPT in train_lora.py — single source of truth is there.
-# Kept in sync manually; if changing, update both files.
-_SYSTEM_PROMPT = "Solve the problem step by step. Put your final answer in \\boxed{}."
-
-
 def _get_mamba_cache_cls(model):
     mod = sys.modules.get(model.__class__.__module__)
     if mod is None:
@@ -36,8 +31,8 @@ def _get_mamba_cache_cls(model):
 
 
 def build_prompt(row: dict, tokenizer) -> str:
-    # Use `or` so empty "system" fields fall back to the training prompt.
-    system = row.get("system") or _SYSTEM_PROMPT
+    # Empty system throughout — matches 0.87 training format (Fix 4 Option A).
+    system = row.get("system", "")
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": row["prompt"]},

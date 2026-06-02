@@ -554,6 +554,39 @@ None — read-only investigation.
 Issue 2 (`\boxed{–}`) and Issue 3 (no `\boxed{}` in augmenter categories) require data
 fixes before the next training run.
 
+#### Complete system prompt history across all runs
+
+| Run | Training system prompt | Inference system prompt | Match? |
+|---|---|---|---|
+| v0.4-huikang (0.49) | `""` (empty — `dict.get()` returned `""`) | `"You are a careful reasoning model. Solve the problem step by step and end with Final answer: \boxed{...}."` | ✗ OOD |
+| v0.4-huikang-r2 (pending) | `"Solve the problem step by step. Put your final answer in \boxed{}."` | same | ✓ |
+| 0.87 notebook (kuangyicheng) | `""` (empty throughout) | `""` (empty throughout) | ✓ |
+
+The 0.87 notebook achieves consistency by using no system prompt at both train and infer
+time — the `\boxed{}` instruction is carried in the user prompt text instead. Our approach
+achieves consistency by injecting the same system prompt at both train and infer time
+via `example.get("system") or SYSTEM_PROMPT`.
+
+Full assistant turn format in training data:
+
+```
+# 9 categories (bit_manipulation, cipher, gravity, numeral, unit_conversion,
+#               cryptarithm_deduce/guess, equation_numeric_deduce/guess)
+<think>
+...reasoning...
+I will now return the answer in \boxed{}
+The answer in \boxed{–} is \boxed{10010111}
+</think>
+\boxed{10010111}
+
+# 5 augmenter categories (matching, splitting, concatenation, spelling, lstrip)
+<think>
+...structured reasoning (e.g. full split table, match sequence)...
+Best: 3 4 5 6 7 0 1 2: 8
+</think>
+(no \boxed{} — response ends here)
+```
+
 ### Follow-ups
 
 1. **Strip `\boxed{–}` in `extract_huikang_corpus.py`** — remove

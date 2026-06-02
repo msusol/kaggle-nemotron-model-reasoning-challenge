@@ -147,24 +147,21 @@ Two confirmed bugs caused the 0.49 regression despite 94.47% token accuracy:
 
 ## Phase 6 — v0.5 (GRPO self-improvement)
 
-See `docs/plans/v0.5-grpo-plan.md` for full details.
+See `docs/plans/v0.5-grpo-plan.md` for algorithm background and memory budgets.
+See `docs/plans/v0.5-huikang-v26-adapter-plan.md` for init adapter details.
 
-GRPO lets the model generate its own reasoning and rewards correctness against ground truth —
-no external CoT needed. Requires only competition problems + answers (9,500 examples we already have).
-TRL 0.15.2 has `GRPOTrainer` but needs `mergekit` installed.
+**Init adapter**: `output/adapter_huikang_v26/` (1.5 GB, all-linear, ~0.85 quality)
+downloaded from `andreyyunoshev/huikang-nemotron-adapter-mirror` (CC0-1.0). Use
+`target_modules="all-linear"` in GRPOConfig to match adapter parameter space.
 
-Sequencing options (see plan for detail):
-- Option 1 (preferred): init from best v0.4 adapter — warm start on all 6 types
-- Option 2 (parallel): run v0.5 from v0.3 concurrently with v0.4; take best Kaggle score
-- Option 3 (fast): skip v0.4, go straight from v0.3 if deadline is tight
-
+- [x] Download `adapter_huikang_v26`; patch `base_model_name_or_path` in config
 - [ ] Add `mergekit` to `Dockerfile.gb10`; rebuild `nemotron-gb10:latest`
 - [ ] Confirm `from trl import GRPOTrainer` works in rebuilt image
-- [ ] Write `scripts/train_grpo.py` with reward function + GRPOConfig
-- [ ] Write `configs/nemotron_grpo.yaml`
+- [ ] Write `scripts/train_grpo.py` — init from v26; `target_modules="all-linear"`
+- [ ] Write `configs/nemotron_grpo.yaml` — LR=1e-6, N=8, max_new_tokens=6144, kl_coeff=0.04
 - [ ] Write `scripts/run_grpo.sh`
-- [ ] Test run: 50 steps on 100 problems — verify reward signal is non-zero
-- [ ] Full run: `RUN_NAME=grpo_v5 bash scripts/run_grpo.sh`
+- [ ] Test run: 50 steps on 100 problems — verify reward signal > 0 across all 14 categories
+- [ ] Full run: `RUN_NAME=grpo_v5_v26 bash scripts/run_grpo.sh`
 - [ ] Validate, package, submit; record in leaderboard
 - [ ] Confirm v0.4 dataset published (Rule 6 lineage) before any v0.5 submission
 

@@ -29,7 +29,9 @@ if [[ -z "${ADAPTER_DIR}" ]]; then
     exit 1
   fi
 fi
+LOG_FILE="${WORKSPACE}/output/inference_$(basename "${ADAPTER_DIR}" | sed 's/adapter_//').log"
 echo "Using adapter: ${ADAPTER_DIR}"
+echo "Log: ${LOG_FILE}"
 
 docker run --rm --privileged \
   -e NVIDIA_VISIBLE_DEVICES=all \
@@ -46,4 +48,4 @@ docker run --rm --privileged \
     --adapter-dir "/workspace/output/$(basename "${ADAPTER_DIR}")" \
     --data-file   /workspace/data/v0.4_valid.jsonl \
     --output-file "/workspace/output/predictions_$(basename "${ADAPTER_DIR}" | sed 's/adapter_//')".jsonl \
-    "${PASSTHROUGH[@]}"
+    "${PASSTHROUGH[@]}" 2>&1 | tee "${LOG_FILE}"

@@ -102,6 +102,11 @@ RUN TORCH_CUDA_ARCH_LIST="8.0;8.6;8.7;8.9;9.0;12.0;12.1+PTX" \
 
 RUN pip install mergekit llm-blender
 
+# vllm: needed by TRL GRPOTrainer (optional backend for fast generation).
+# Same install as Dockerfile.vllm-gb10.
+RUN TORCH_CUDA_ARCH_LIST="8.0;8.6;8.7;8.9;9.0;12.0;12.1+PTX" \
+    pip install vllm
+
 RUN pip install scikit-build-core
 # Build bitsandbytes to /opt/bitsandbytes (not /workspace) so the -v /workspace mount
 # at runtime doesn't hide the source. Use non-editable install so compiled .so files

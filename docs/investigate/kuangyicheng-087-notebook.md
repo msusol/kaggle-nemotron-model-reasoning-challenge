@@ -598,3 +598,62 @@ Best: 3 4 5 6 7 0 1 2: 8
    on re-extraction. If no, the scorer parses structured output and the current format
    may be intentionally correct.
 3. **Re-run extraction** after fixes 1 and 2, then retrain before v0.6 GRPO init.
+
+---
+
+## 9. NVIDIA API (build.nvidia.com) vs Tinker vs kuangyicheng's short-response approach
+
+**Context:** A common Kaggle discussion suggestion is "use the NVIDIA API at
+`build.nvidia.com` — it's free." This section explains what that means, what Tinker is,
+and why the suggestion is irrelevant to the 0.87 approach.
+
+### What "Tinker" is
+
+"Tinker" is huikang's brand name for his CoT generation pipeline. His
+`samvalladares/huikang-nemotron-artifacts` corpus was produced by prompting a capable
+reasoning model (likely `nvidia/Llama-3.1-Nemotron-70B-Instruct`) to solve each
+competition problem with an exhaustive algorithmic chain-of-thought. The distinctive
+`The answer in \boxed{–} is \boxed{answer}` template line in his responses is Tinker's
+output format — it's why `extract_huikang_corpus.py` strips it in `parse_unmasked()`.
+
+### What build.nvidia.com offers
+
+`build.nvidia.com` is NVIDIA's hosted inference API — free (rate-limited) access to
+models including `nvidia/Llama-3.1-Nemotron-70B-Instruct`, `nvidia/Nemotron-3-Nano-30B-A3B-Instruct`,
+and others. The suggestion is: instead of using huikang's pre-built corpus (which has
+format quirks and needs complex extraction), call the API yourself to generate fresh
+CoT traces for the competition problems with full control over format.
+
+### Why this doesn't apply to the 0.87 approach
+
+kuangyicheng's 0.87 notebook (`https://www.kaggle.com/code/kuangyicheng/nemotron-087-training`)
+does **not** use the NVIDIA API or Tinker at all. Its training data comes entirely from:
+
+- `train.csv` competition examples (9,500 rows) with **short** one-sentence responses
+- Simple rule-based synthetic generators for 5 categories (12,000 rows) — no LLM calls required
+- Warmstart from huikang's v27 adapter (which has already internalized the CoT reasoning)
+
+The NVIDIA API / Tinker suggestion is relevant only if rebuilding huikang's 0.85
+long-CoT corpus from scratch. That path has a fundamental problem on Kaggle regardless
+of data quality:
+
+**Long-CoT responses hit Kaggle's `max_new_tokens` limit before outputting `\boxed{}`.**
+The model generates 3,000+ token reasoning chains; the runner cuts off mid-chain and the
+answer is never emitted. This is the root cause of every v0.4 regression (0.48–0.50).
+
+### Approach comparison
+
+| Approach | Score | Data source | Response length | Kaggle compatible |
+|---|---|---|---|---|
+| huikang (Tinker / long-CoT) | 0.85 | NVIDIA API / Tinker pipeline | 3,000+ tokens | ⚠️ hits token limit |
+| kuangyicheng (warmstart + short) | **0.87** | `train.csv` + rule-based synthetic | ~30 tokens | ✅ always emits `\boxed{}` |
+| v0.4 (our runs, huikang corpus) | 0.48–0.50 | `samvalladares/huikang-nemotron-artifacts` | 3,000+ tokens | ❌ blank answers |
+
+### Conclusion
+
+The NVIDIA API would be useful for regenerating a Tinker-style corpus with cleaner
+format (no `\boxed{–}` placeholder, controlled system prompts). But it doesn't
+help with the token-limit problem — long-CoT is fundamentally incompatible with
+Kaggle's runner regardless of how the data was generated. The 0.87 result is
+achieved precisely by abandoning long-CoT and using short responses that always
+complete within the token budget.

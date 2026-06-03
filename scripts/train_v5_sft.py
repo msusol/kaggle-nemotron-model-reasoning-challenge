@@ -250,8 +250,13 @@ def main():
         def get_train_dataloader(self):
             if self._stratified_order is None:
                 return super().get_train_dataloader()
+            # Mirror Trainer.get_train_dataloader: drop columns the model forward()
+            # doesn't accept (e.g. 'text', 'messages') before the collator sees them.
+            # Without this, DataCollatorForLanguageModeling tries to tensorize the
+            # 'text' string column and raises "too many dimensions 'str'".
+            dataset = self._remove_unused_columns(self.train_dataset, description="training")
             return DataLoader(
-                self.train_dataset,
+                dataset,
                 batch_size=self.args.per_device_train_batch_size,
                 sampler=OrderedSampler(self._stratified_order),
                 collate_fn=self.data_collator,

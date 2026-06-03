@@ -159,8 +159,8 @@ responses. Matches the 0.87 notebook approach exactly.
 - [x] Download `huikang/nemotron-adapter/Transformers/default/27` → `output/adapter_huikang_v27/`
 - [x] Patch `adapter_config.json` — set `base_model_name_or_path`
 - [x] Write `scripts/train_v5_sft.py` + `scripts/run_train_v5.sh`
-- [ ] Run training (tmux): `tmux new -s train_v5 && RUN_NAME=v5_sft bash scripts/run_train_v5.sh`
-- [ ] Package and submit; record in leaderboard
+- [x] Run training (tmux): `RUN_NAME=v5_sft bash scripts/run_train_v5.sh` — completed 2026-06-03, 240 steps / 57 min; train_loss=0.5441, token_acc=87.2%; adapter at `output/adapter_v5_sft`
+- [x] Package and submit — submitted 2026-06-03; Kaggle score *pending*
 - [ ] If score ≥ 0.85 → proceed to v0.6 GRPO
 
 ## NVIDIA API data generation (defer — investigate if v0.5 < 0.80 or post-competition)

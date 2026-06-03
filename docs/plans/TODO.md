@@ -163,6 +163,19 @@ responses. Matches the 0.87 notebook approach exactly.
 - [ ] Package and submit; record in leaderboard
 - [ ] If score ≥ 0.85 → proceed to v0.6 GRPO
 
+## NVIDIA API data generation (defer — investigate if v0.5 < 0.80 or post-competition)
+
+See `docs/plans/nvidia-api-data-generation-plan.md`.
+
+Reduces dependency on borrowed adapters (huikang v27 warmstart, kuangyicheng approach).
+Use cases: better synthetic data for SFT, clean CoT corpus without Tinker quirks,
+independent warmstart training, GRPO problem distribution expansion.
+
+- [ ] Register free API key at build.nvidia.com → set `NVIDIA_API_KEY` in `.env`
+- [ ] Write `scripts/generate_api_data.py` — batched calls with retry/backoff
+- [ ] Generate `data/v_api_train.jsonl` (short-response style, 21,500 rows)
+- [ ] Compare Kaggle score vs v0.5 rule-based synthetic data
+
 ## NeMo dataset refresh (defer until after v0.5 SFT scores)
 
 See `docs/plans/v0.5-nemo-framework-plan.md`.

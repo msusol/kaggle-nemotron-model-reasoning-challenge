@@ -36,4 +36,4 @@ Tracks every training run — config, training metrics, and validation results �
 | v0.4-huikang-r2 | 2026-06-02 | 5 | `output/adapter_huikang_v4_20260601_194000` | 1 | 32 | 2e-4 | 8192 | No | 0.221 | — | 0.2072 | *pending* | 0.50 | System prompt fix +0.01 vs r1; root cause identified: system prompt contradicts no-\boxed{} in 8,046 augmenter rows (~53% of train) → those categories score 0 on Kaggle |
 | v0.4-huikang-r3 | 2026-06-03 | 5 | `output/adapter_huikang_v4r3_20260602_142413` | 1 | 32 | 2e-4 | 8192 | No | 0.2218 | 94.48% | 0.2093 | *pending* | *pending* | Fix 3+4: empty system + stripped \boxed{–}; 948 steps / 14.3h; linear LR decay |
 | v0.4-huikang-v26 | 2026-06-02 | 5 | `output/adapter_huikang_v26` | — | 32 | — | — | No | — | — | — | — | ❌ error | Kaggle evaluation crash — likely PEFT/all-linear incompatibility in notebook env; not investigating |
-| v0.5-grpo | *pending* | 6 | *pending* | 1–2 | 32 | 1e-6 | 4096 | No | — | — | — | — | — | GRPO init from v0.4-r3 adapter; 9,500 competition problems |
+| v0.6-grpo | *pending* | 6 | *pending* | 1–2 | 32 | 1e-6 | 4096 | No | — | — | — | — | — | GRPO init from v0.4-r3 adapter; 9,500 competition problems |

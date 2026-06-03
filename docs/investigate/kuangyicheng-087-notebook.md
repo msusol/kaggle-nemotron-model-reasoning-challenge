@@ -165,7 +165,7 @@ a GPU spec and run `scripts/train_lora.py` or `scripts/train_grpo.py` directly.
       capability list and AnandTech article URL slug ("96gb-gddr7")
 - [x] Identify which GPUs can fit the 30B BF16 model (~60 GB VRAM minimum)
 - [x] Estimate v0.4 SFT hours from our actual GB10 run (14.4 h / 948 steps)
-- [x] Estimate v0.5 GRPO hours for a practical 1,000-step run
+- [x] Estimate v0.6 GRPO hours for a practical 1,000-step run
 - [x] Check free-tier credit amounts
 
 ### Findings
@@ -196,7 +196,7 @@ Both options cost roughly the same — A100-80GB is ~$3 cheaper and is the bette
 pick if the memory fits comfortably with GC. RTX PRO 6000 is lower risk (same Blackwell
 arch, no unknowns around GC behaviour at seq_len=8192).
 
-**v0.5 GRPO cost estimate** — GRPO is generation-heavy. Each step generates N=8 responses
+**v0.6 GRPO cost estimate** — GRPO is generation-heavy. Each step generates N=8 responses
 before a gradient update. A practical run is 1,000–2,000 gradient steps (not full epochs
 over all 9,500 problems, which would be thousands of hours):
 
@@ -205,7 +205,7 @@ over all 9,500 problems, which would be thousands of hours):
 | RTX PRO 6000 | ~30–40 h | $3.03 | **~$91–$121** |
 | A100-80GB | ~38–50 h | $2.50 | **~$95–$125** |
 
-**Combined v0.4 SFT + v0.5 GRPO: roughly $140–$175** using RTX PRO 6000.
+**Combined v0.4 SFT + v0.6 GRPO: roughly $140–$175** using RTX PRO 6000.
 
 **Free-tier credits:**
 
@@ -312,7 +312,7 @@ differences remain between the kuangyicheng approach and our v0.4 TRL implementa
 - [x] Compare training configs (LR schedule, batching, targets, seq length)
 - [x] Identify Tinker-specific features not in TRL SFTTrainer
 - [x] Assess iterative self-improvement rounds (`adapter_v26` tag)
-- [x] Map gaps to our v0.5 GRPO plan
+- [x] Map gaps to our v0.6 GRPO plan
 
 ### Findings
 
@@ -334,14 +334,14 @@ differences remain between the kuangyicheng approach and our v0.4 TRL implementa
 | LR schedule | Linear decay to 0 | Cosine annealing | 15 min — `get_linear_schedule_with_warmup` |
 | Batch strategy | Stratified (equal per-category mix) | Global shuffle | 30 min — sort JSONL by category |
 | MoE weight tying | 1 LoRA set shared × 128 experts | Independent per expert | 1–2 days — custom PEFT hook |
-| Iterative self-improvement | 26+ training rounds with logprob reweighting | 1 round | v0.5 GRPO (already planned) |
+| Iterative self-improvement | 26+ training rounds with logprob reweighting | 1 round | v0.6 GRPO (already planned) |
 
 **The 0.87 vs 0.85 delta** is likely iterative self-improvement rounds, not a single
 training change. `adapter_v26` in the artifact names implies 26 iterations of
 train → collect logprobs → reweight → train again. The 0.87 notebook probably uses v28+.
 
 **The iterative self-improvement pattern is exactly what GRPO achieves**, via a cleaner
-RL formulation. Our v0.5 plan (`docs/plans/v0.5-grpo-plan.md`) is the correct path to
+RL formulation. Our v0.5 plan (`docs/plans/v0.6-grpo-plan.md`) is the correct path to
 reach and exceed 0.87 without replicating the Modal/Tinker infrastructure.
 
 ### Actions Taken
@@ -358,7 +358,7 @@ GRPO, not Tinker replication.
 
 1. Once v0.4 Kaggle score is known: if < 0.82, add linear LR schedule and stratified
    dataset ordering before proceeding to v0.5.
-2. If v0.4 ≥ 0.80: proceed directly to v0.5 GRPO per `docs/plans/v0.5-grpo-plan.md`.
+2. If v0.4 ≥ 0.80: proceed directly to v0.6 GRPO per `docs/plans/v0.6-grpo-plan.md`.
 3. MoE weight tying is deferred — moderate quality impact, high engineering cost, and
    GRPO likely outperforms it anyway.
 
@@ -408,7 +408,7 @@ identical CUDA kernel paths, numerics, and output.
 **For this competition, GB10 is the correct choice:**
 
 1. **Cost**: $0/hr vs $3.03/hr. At 14 hrs/run × multiple attempts (v0.4 regressions,
-   v0.5 GRPO), Modal costs accumulate to $100–$200+. Speed is irrelevant if the hardware
+   v0.6 GRPO), Modal costs accumulate to $100–$200+. Speed is irrelevant if the hardware
    is free and finishes before the deadline.
 2. **Memory headroom**: 128 GB absorbs GRPO batch spikes that 96 GB cannot.
 3. **Already configured**: Docker image, GC patches, page-cache dropper, and preflight
@@ -433,7 +433,7 @@ and requires porting work. Use Modal only as a fallback.
 
 - If the GB10 is unavailable: set up the Modal adapter (see §6 follow-ups) and use
   RTX PRO 6000 at $3.03/hr.
-- If a v0.5 GRPO run is expected to take > 48 hours on GB10, it may be worth paying
+- If a v0.6 GRPO run is expected to take > 48 hours on GB10, it may be worth paying
   for Modal to stay within competition deadline.
 
 ---
@@ -597,4 +597,4 @@ Best: 3 4 5 6 7 0 1 2: 8
    (not present in our training prompts). If yes, add the instruction to training prompts
    on re-extraction. If no, the scorer parses structured output and the current format
    may be intentionally correct.
-3. **Re-run extraction** after fixes 1 and 2, then retrain before v0.5 GRPO init.
+3. **Re-run extraction** after fixes 1 and 2, then retrain before v0.6 GRPO init.

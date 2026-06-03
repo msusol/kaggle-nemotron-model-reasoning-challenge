@@ -126,7 +126,7 @@ flag, not by missing implementation. See `docs/investigate/v0.4-oom-training.md`
 - [ ] Validate boxed-answer acc via `validate_metric.py` once inference completes (inference job running against v0.4_valid.jsonl)
 - [ ] Link `samvalladares/huikang-nemotron-artifacts` from prize eligibility notebook (Rule 6)
 
-## v0.4 regression fixes — apply before next SFT or v0.5 GRPO
+## v0.4 regression fixes — apply before next SFT or v0.6 GRPO
 
 See `docs/investigate/v0.4-kaggle-regression.md` for full root cause analysis.
 
@@ -147,7 +147,7 @@ Two confirmed bugs caused the 0.49 regression despite 94.47% token accuracy:
 
 ## Phase 6 — v0.5 (GRPO self-improvement)
 
-See `docs/plans/v0.5-grpo-plan.md` for algorithm background and memory budgets.
+See `docs/plans/v0.6-grpo-plan.md` for algorithm background and memory budgets.
 See `docs/plans/v0.5-huikang-v26-adapter-plan.md` for init adapter details.
 
 **Init adapter**: `output/adapter_huikang_v26/` (1.5 GB, all-linear, ~0.85 quality)

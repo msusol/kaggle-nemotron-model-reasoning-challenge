@@ -22,17 +22,16 @@ from scratch, eliminating both dependencies.
 
 ---
 
-## What build.nvidia.com is (vs NeMo)
+## What build.nvidia.com is
 
-| | build.nvidia.com | NeMo Framework |
-|---|---|---|
-| What it is | Hosted inference API — call models, get completions | Training framework — fine-tune models on your own hardware |
-| Relevant to | Data generation | Model training (see `v0.5-nemo-framework-plan.md`) |
-| Cost | Free tier (rate-limited); paid tiers available | Free (runs on GB10 locally) |
-| API style | OpenAI-compatible REST API | Python SDK / NeMo Aligner |
-| Key models | Llama-3.1-Nemotron-70B-Instruct, Nemotron-3-Nano-30B-A3B-Instruct | Any model locally |
+Hosted inference API — call NVIDIA-hosted models and get completions back.
+OpenAI-compatible REST API, free tier with rate limits, no GPU required.
 
-These are completely separate. The NVIDIA API is used at **data generation time**; NeMo is used at **training time**.
+Key models available:
+- `nvidia/llama-3.1-nemotron-70b-instruct` — capable reasoning model, same class as huikang used for Tinker
+- `nvidia/nemotron-3-nano-30b-a3b-instruct` — the base of the competition model itself
+
+Used purely at **data generation time** — produces training data that is then used to fine-tune locally on the GB10.
 
 ---
 

@@ -22,6 +22,7 @@ Usage (via run_train_v5.sh):
 
 import argparse
 import sys
+import threading
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +46,47 @@ def parse_args():
     ap.add_argument("--grad-accum",    type=int, default=16)
     ap.add_argument("--seed",          type=int, default=3407)
     return ap.parse_args()
+
+
+def _make_cache_dropper(interval: float = 20.0) -> threading.Event:
+    """Background thread that drops Linux page cache and CUDA freed blocks every interval s.
+
+    During from_pretrained, temporary dtype-conversion tensors accumulate as
+    reserved-but-freed CUDA allocator cache (~41 GB at 80% load) and crowd out
+    the remaining weight shards. empty_cache() releases them back to the driver.
+    Page cache drop clears safetensors mmap residue from Linux RAM.
+    Returns a stop Event; set it to halt the thread after loading completes.
+    """
+    import torch as _torch
+
+    stop = threading.Event()
+
+    def _loop():
+        while not stop.wait(interval):
+            try:
+                with open("/proc/sys/vm/drop_caches", "w") as fh:
+                    fh.write("3\n")
+            except OSError:
+                pass
+            try:
+                free_before = _torch.cuda.mem_get_info()[0]
+                _torch.cuda.empty_cache()
+                free_after = _torch.cuda.mem_get_info()[0]
+                reclaimed = (free_after - free_before) / 1e9
+                alloc = _torch.cuda.memory_allocated() / 1e9
+                reserv = _torch.cuda.memory_reserved() / 1e9
+                print(
+                    f"[dropper] reclaimed={reclaimed:+.1f}GB"
+                    f" alloc={alloc:.1f}GB reserv={reserv:.1f}GB"
+                    f" free={free_after/1e9:.1f}GB",
+                    flush=True,
+                )
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_loop, daemon=True, name="cache-dropper")
+    t.start()
+    return stop
 
 
 def main():
@@ -89,12 +131,17 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
 
     print(f"Loading base model: {args.model_id}", flush=True)
+    _stop_dropper = _make_cache_dropper(interval=20.0)
     base_model = AutoModelForCausalLM.from_pretrained(
         args.model_id,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map={"": 0},
         low_cpu_mem_usage=True,
     )
+    _stop_dropper.set()
+    torch.cuda.empty_cache()
+    free_gb = torch.cuda.mem_get_info()[0] / 1e9
+    print(f"Base model loaded. GPU free={free_gb:.1f}GB", flush=True)
 
     _patch_mamba_fastpath(base_model)
 

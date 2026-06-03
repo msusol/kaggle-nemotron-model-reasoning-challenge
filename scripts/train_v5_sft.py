@@ -317,17 +317,40 @@ def main():
     model.save_pretrained(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
 
-    # Fix lm_head key naming (Unsloth convention used by kuangyicheng submission)
+    # Merge v27 keys that standard PEFT cannot load back into the saved adapter.
+    #
+    # v27 was created with Unsloth which adds LoRA support for non-standard module
+    # paths that don't exist as nn.Linear in the transformers implementation:
+    #   - mixer.experts.w1/w2/w3  (MoE expert weights stored as batched 3-D tensors)
+    #   - mixer.gate_proj, mixer.x_proj  (Mamba-specific projections)
+    #   - mixer.shared_experts.up_proj/down_proj
+    #
+    # Standard PEFT silently drops these 232 keys when loading v27 (can't map them
+    # to nn.Module). We train only the 186 standard keys it CAN load. Without merging
+    # the dropped keys back, the submitted adapter is missing the bulk of v27's
+    # capability → Kaggle score regresses from 0.85 to ~0.56.
+    #
+    # Fix: start with all of v27's keys, overwrite the 186 keys we trained, add
+    # the 46 new keys (in_proj etc.). Result: full v27 coverage + our SFT updates.
     st_path = Path(args.output_dir) / "adapter_model.safetensors"
-    if st_path.exists():
-        tensors = load_file(str(st_path))
-        renamed = {
-            k.replace("base_model.model.lm_head.", "base_model.model.backbone.lm_head."): v
-            for k, v in tensors.items()
-        }
-        if renamed != tensors:
-            save_file(renamed, str(st_path))
-            print("Applied lm_head key rename fix", flush=True)
+    warmstart_st = Path(args.warmstart_dir) / "adapter_model.safetensors"
+    if st_path.exists() and warmstart_st.exists():
+        from safetensors import safe_open
+        trained = load_file(str(st_path))
+        merged = {}
+        with safe_open(str(warmstart_st), framework="pt", device="cpu") as ws:
+            for k in ws.keys():
+                merged[k] = ws.get_tensor(k)
+        n_overwrite = sum(1 for k in trained if k in merged)
+        n_new = sum(1 for k in trained if k not in merged)
+        merged.update(trained)  # trained weights take priority
+        save_file(merged, str(st_path))
+        print(
+            f"Merged warmstart keys: {len(merged)} total"
+            f" ({n_overwrite} overwritten by training, {n_new} new, "
+            f"{len(merged)-len(trained)} restored from warmstart)",
+            flush=True,
+        )
 
     print(f"Saved adapter to {args.output_dir}", flush=True)
     for f in sorted(Path(args.output_dir).iterdir()):

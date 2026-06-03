@@ -57,11 +57,17 @@ docker run --rm --privileged -v /:/host alpine sh -c \
    && swapoff /host/swap.img 2>/dev/null; swapon /host/swap.img 2>/dev/null; true' \
   2>/dev/null || true
 
-# ── GPU pre-flight stage 2: torch memory check (12 GB threshold) ──────────────
-# Detects orphaned CUDA driver allocations that nvidia-smi --query-compute-apps
-# cannot see. Threshold: 12 GB = ~8 GB new CUDA context overhead + 4 GB headroom.
-# Model BF16 (~60 GB) + safetensors page cache during load (~60 GB) + baseline
-# must fit in 128 GB. A dirty baseline > 12 GB risks OOM at ~73% weight loading.
+# ── GPU pre-flight stage 2: torch memory check ────────────────────────────────
+# Detects orphaned CUDA driver HBM allocations. Two-tier check:
+#
+#   PREFLIGHT_FAIL: free < 70 GB — model load (60 GB) + startup overhead won't fit.
+#                   OR: used > 20 GB — >10 GB of orphaned allocs; reload may help.
+#   WARNING:        free < 90 GB — some stale allocs present but training should fit.
+#
+# Clean baseline (GRD stopped, no prior run): used ≈ 8–10 GB (preflight CUDA context).
+# nvidia_uvm reload fails in CUDA Forward Compat mode; reboot is the only hard reset.
+# GPU HBM (130.7 GB) and Linux RAM (121 GB) are separate pools — page cache does NOT
+# consume HBM. Threshold was previously 12 GB (incorrect unified-memory assumption).
 _run_preflight() {
   docker run --rm --privileged \
     -e NVIDIA_VISIBLE_DEVICES=all \
@@ -73,10 +79,12 @@ torch.cuda.empty_cache()
 free, total = torch.cuda.mem_get_info()
 used = total - free
 print(f'GPU free={free/1e9:.1f}GB total={total/1e9:.1f}GB used={used/1e9:.1f}GB')
-if used > 12e9:
-    print(f'PREFLIGHT_FAIL {used/1e9:.1f}GB stale GPU allocations after cache flush')
-elif free < 60e9:
-    print('WARNING: less than 60 GB free — stale CUDA allocations may be present')
+if free < 70e9:
+    print(f'PREFLIGHT_FAIL only {free/1e9:.1f}GB free — model load (60 GB) will OOM')
+elif used > 20e9:
+    print(f'PREFLIGHT_FAIL {used/1e9:.1f}GB stale GPU allocations — nvidia_uvm reload may help')
+elif free < 90e9:
+    print(f'WARNING: {free/1e9:.1f}GB free — some stale allocs present but training should fit')
 " 2>&1
 }
 

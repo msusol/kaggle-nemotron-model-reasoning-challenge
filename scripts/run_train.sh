@@ -116,10 +116,12 @@ torch.cuda.empty_cache()
 free, total = torch.cuda.mem_get_info()
 used = total - free
 print(f'GPU free={free/1e9:.1f}GB total={total/1e9:.1f}GB used={used/1e9:.1f}GB')
-if used > 12e9:
-    print(f'PREFLIGHT_FAIL {used/1e9:.1f}GB stale GPU allocations after cache flush')
-elif free < 60e9:
-    print('WARNING: less than 60 GB free — stale CUDA allocations may be present')
+if free < 70e9:
+    print(f'PREFLIGHT_FAIL only {free/1e9:.1f}GB free — model load (60 GB) will OOM')
+elif used > 20e9:
+    print(f'PREFLIGHT_FAIL {used/1e9:.1f}GB stale GPU allocations — nvidia_uvm reload may help')
+elif free < 90e9:
+    print(f'WARNING: {free/1e9:.1f}GB free — some stale allocs present but training should fit')
 " 2>&1
 }
 

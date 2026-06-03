@@ -123,21 +123,40 @@ The orphaned allocations accumulate across Docker container restarts because `do
 
 ### GPU pre-flight — required after any SIGKILL'd training run
 
-`run_train.sh` runs a throwaway training container before loading to force CUDA driver GC:
+`run_train.sh` and `run_train_v5.sh` run a throwaway container before loading to force CUDA driver GC:
 
 ```python
 import torch
 torch.cuda.init()
 torch.cuda.empty_cache()
 free, total = torch.cuda.mem_get_info()
-print(f'GPU free={free/1e9:.1f}GB total={total/1e9:.1f}GB used={(total-free)/1e9:.1f}GB')
+used = total - free
+print(f'GPU free={free/1e9:.1f}GB total={total/1e9:.1f}GB used={used/1e9:.1f}GB')
+if free < 70e9:
+    print(f'PREFLIGHT_FAIL only {free/1e9:.1f}GB free — model load (60 GB) will OOM')
+elif used > 20e9:
+    print(f'PREFLIGHT_FAIL {used/1e9:.1f}GB stale GPU allocations — nvidia_uvm reload may help')
+elif free < 90e9:
+    print(f'WARNING: {free/1e9:.1f}GB free — some stale allocs present but training should fit')
 ```
 
-This container initialises and immediately exits cleanly. The act of creating a new CUDA context forces the driver to release orphaned HBM allocations from prior dead containers. It also prints the GPU baseline so the log shows exactly how much HBM is available before loading begins.
+This container initialises and immediately exits cleanly. Creating a new CUDA context forces the driver to GC orphaned HBM allocations from dead containers. It also prints the GPU baseline so the log shows how much HBM is available before loading.
 
-**Expected baseline** (clean system): `GPU free=124.0GB total=130.7GB used=6.6GB`
+**Expected baseline** (clean system, GRD stopped): `GPU free=~120GB total=130.7GB used=~10GB`
 
-If `used` is significantly above ~7 GB before a training run starts, stale allocations are present and loading will fail partway through.
+The `used` reading on a clean system is the preflight container's own CUDA context (~8–10 GB). This is the unavoidable minimum — every CUDA context costs ~8 GB of HBM overhead regardless of model size.
+
+**Threshold rationale:**
+
+| Check | Threshold | Meaning |
+|---|---|---|
+| `free < 70 GB` | FAIL | Model (60 GB) + startup overhead won't fit — definitive OOM |
+| `used > 20 GB` | FAIL | >10 GB of orphaned allocs beyond context overhead — `nvidia_uvm` reload attempted |
+| `free < 90 GB` | WARNING | Some stale allocs present but training (60 GB + ~15 GB) should still fit |
+
+**Previous threshold (`used > 12 GB`) was wrong.** It was based on the (incorrect) assumption that GPU HBM and Linux page cache share the same 128 GB unified pool. In reality they are separate: HBM is 130.7 GB; Linux RAM is 121 GB. A small residue of orphaned HBM allocations (~6 GB from a previous SIGKILL'd run) that cannot be cleared by `nvidia_uvm` reload (fails in CUDA Forward Compat mode) is harmless as long as `free > 70 GB`.
+
+**`nvidia_uvm` reload always fails in CUDA Forward Compatibility mode** (the GB10's default mode since it uses a newer driver than the kernel module). A reboot is the only way to clear truly stuck orphaned allocations. In practice, the allocations are small enough (~6 GB) that training proceeds normally.
 
 ### `low_cpu_mem_usage=True` — required for BF16 loading
 

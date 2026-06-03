@@ -4,6 +4,13 @@ https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge
 
 This repo contains the full pipeline for training a Nemotron LoRA adapter on a GB10-style NVIDIA system using Hugging Face, PEFT, TRL, and DSPy, then exporting a Kaggle-compatible `submission.zip`.
 
+## Methodology
+
+This project applies the **vibe planning** methodology to competitive ML — using Claude Code
+as an active collaborator throughout research, debugging, and implementation rather than as a
+code generator. The approach is demonstrated in
+[msusol/vibe-planning-dgx-spark-demo](https://github.com/msusol/vibe-planning-dgx-spark-demo).
+
 ## Goal
 
 The target competition is the **NVIDIA Nemotron Model Reasoning Challenge** on Kaggle. The required submission is a LoRA adapter for **Nemotron-3-Nano-30B** with rank at most 32, evaluated under vLLM with deterministic generation settings and a metric that prefers answers inside `\\boxed{}`.
@@ -21,7 +28,7 @@ the competition **test set has 14 problem categories**, but the training CSV onl
 Any model trained solely on `train.csv` data scores 0% on the 8 unseen test categories, which
 together represent the majority of the evaluation set.
 
-### v0.4 — SFT on the huikang corpus (target: ~0.85)
+### v0.4 — SFT on the huikang corpus
 
 The `samvalladares/huikang-nemotron-artifacts` public dataset contains 15,979 pre-tokenized
 training examples covering **both the training set and the full test set**, including all 14
@@ -34,6 +41,10 @@ Key changes vs v0.1–v0.3:
 - `max_seq_length=8192` — exhaustive reasoning traces average 3,292 tokens (was 4096, truncating most traces)
 - `target_modules` expanded to include attention layers (q/k/v/o) + lm_head (was Mamba only)
 - `lr=2e-4` with one epoch — matches the validated huikang training config
+
+Three v0.4 runs were needed to identify and fix the regression causes — see
+[`docs/investigate/v0.4-kaggle-regression.md`](docs/investigate/v0.4-kaggle-regression.md)
+for the full root cause analysis and fix history.
 
 See [`docs/investigate/huikang-pipeline.md`](docs/investigate/huikang-pipeline.md) for a full
 analysis of the corpus, the solver approach, and the Tinker training framework.
@@ -66,14 +77,16 @@ See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full 
 ├── README.md
 ├── Dockerfile.gb10                      # primary build (26.04-py3)
 ├── Dockerfile.vllm-gb10                 # vLLM serving image — CoT generation + GRPO inference
-├── .clinerules/                         # 17 rules (framework 01-12, project-specific 13-17)
+├── .clinerules/                         # 18 rules (framework 01-12, project-specific 13-18)
 ├── configs/
 │   └── nemotron.yaml                # training hyperparameters
-├── data/                            # large data files — gitignored, generate locally (see below)
-│   ├── v0.4_train.jsonl     # 15,159 examples — huikang corpus (run scripts/run_extract_huikang_corpus.sh)
-│   ├── v0.4_valid.jsonl     # 820 examples   — huikang corpus validation split
-│   ├── nemo_train.jsonl     # 15,159 examples — NeMo-format (published on Kaggle, see below)
-│   ├── nemo_valid.jsonl     # 820 examples   — NeMo-format validation split
+├── data/
+│   ├── train.csv            # competition training labels (9,500 problems, 6 categories) — committed
+│   ├── test.csv             # competition test prompts (held-out) — committed
+│   ├── v0.4_train.jsonl     # 15,159 examples — huikang corpus (gitignored; run run_extract_corpus.sh)
+│   ├── v0.4_valid.jsonl     # 820 examples   — huikang corpus validation split (gitignored)
+│   ├── nemo_train.jsonl     # 15,159 examples — NeMo-format (gitignored; or download from Kaggle)
+│   ├── nemo_valid.jsonl     # 820 examples   — NeMo-format validation split (gitignored)
 │   └── nemo_dataset/        # Kaggle dataset card (README.md + dataset-metadata.json — committed)
 ├── docs/
 │   ├── images/
@@ -82,19 +95,28 @@ See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full 
 │   │   ├── training_v03.png                # v0.3 training curves
 │   │   └── training_v04.png                # v0.4 training curves (loss, token acc, LR)
 │   ├── investigate/
-│   │   ├── dataset-comparison.md        # raw competition data vs peer CoT dataset
-│   │   ├── v0.3-training-analysis.md    # v0.3 training metrics and analysis
-│   │   └── huikang-pipeline.md          # 0.85 corpus investigation — solvers, Tinker, test categories
+│   │   ├── dataset-comparison.md           # raw competition data vs peer CoT dataset
+│   │   ├── huikang-pipeline.md             # 0.85 corpus investigation — solvers, Tinker, test categories
+│   │   ├── kuangyicheng-087-notebook.md    # 0.87 notebook analysis — Modal infra, format audit, cost
+│   │   ├── kaggle-notebook-setup.md        # Kaggle env quirks — utility script, trust_remote_code
+│   │   ├── v0.3-training-analysis.md       # v0.3 training metrics and analysis
+│   │   ├── v0.4-training-analysis.md       # v0.4 runs comparison + LR schedule explanation
+│   │   ├── v0.4-kaggle-regression.md       # root cause of 0.49/0.50 regression; Fix 1–4 status
+│   │   ├── v0.4-oom-loading.md             # CUDA allocator cache OOM during model load
+│   │   └── v0.4-oom-training.md            # activation memory OOM at seq_len=8192
 │   └── plans/
 │       ├── TODO.md                      # central task checklist
 │       ├── leaderboard.md               # run history and scores
+│       ├── leaderboard.md               # run history and scores
+│       ├── TODO.md                      # central task checklist
 │       ├── v0.3-cot-filtered-plan.md    # v0.3 plan (complete — Kaggle 0.50)
-│       ├── v0.4-blended-plan.md         # v0.4 plan — huikang corpus SFT (seq=8192)
-│       ├── v0.5-grpo-plan.md            # v0.5 plan — GRPO self-improvement
-│       ├── implementation-plan.md
+│       ├── v0.4-blended-plan.md         # v0.4 plan — huikang corpus SFT
+│       ├── v0.4-nemo-framework-plan.md  # NeMo framework alternative training path
+│       ├── v0.5-grpo-plan.md            # v0.5 GRPO plan — init from v0.4-r3 adapter
+│       ├── v0.5-huikang-v26-adapter-plan.md  # v26 adapter analysis (superseded — all-linear incompatible)
 │       ├── competition-overview.md
 │       ├── CITATIONS.md
-│       └── ...                          # other plan files
+│       └── ...                          # submission-*, hybrid-mamba-*, archive/
 ├── notebook/
 │   ├── kaggle_prize_eligibility_outline.ipynb   # public prize eligibility writeup
 │   ├── kernel-metadata.json                     # push config for prize notebook
@@ -119,8 +141,13 @@ See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full 
     ├── run_download.sh              # runner: competition data
     ├── run_download_peer_cot.sh     # runner: peer CoT dataset
     ├── run_smoke_test.sh
-    ├── run_train.sh                 # runner: training (reads configs/nemotron.yaml)
-    ├── run_inference.sh
+    ├── extract_huikang_corpus.py    # decode pre-tokenized huikang artifacts → v0.4 JSONL
+    ├── convert_jsonl_to_nemo.py     # tokenize v0.4 JSONL → NeMo pre-tokenized SFT format
+    ├── prepare_nemo_dataset.py      # NeMo dataset preparation (alternative path)
+    ├── run_extract_corpus.sh        # runner: extract huikang corpus → data/v0.4_*.jsonl
+    ├── run_convert_jsonl_to_nemo.sh # runner: tokenize → data/nemo_dataset/nemo_*.jsonl
+    ├── run_train.sh                 # runner: training (reads configs/nemotron.yaml; tees log)
+    ├── run_inference.sh             # runner: inference (tees log to output/inference_*.log)
     ├── run_validate.sh
     ├── run_vllm.sh                  # start vLLM OpenAI-compatible server (nemotron-vllm-gb10)
     └── services.sh                  # pause/resume non-training containers around a training run
@@ -300,10 +327,12 @@ See [`docs/plans/leaderboard.md`](docs/plans/leaderboard.md) for the full run hi
 
 | Version | Data | Val Acc | Kaggle Score |
 |---|---|---|---|
-| v0.1-baseline | Competition labels only | 43.5% (413/950) | 0.57 |
-| v0.2-cot | Peer CoT (Gemini-2.0-flash, noisy) | 30.7% (285/929) | 0.54 — regression |
-| v0.3-filtered | Correctness-filtered CoT (kishanvavdara) | pending | 0.50 — regression; test set has 14 categories, training covered only 6 |
-| v0.4-huikang | Huikang corpus — 15,979 problems incl. test set, seq=8192 | pending | pending |
+| v0.1-baseline | Competition labels only | 43.5% | 0.57 |
+| v0.2-cot | Peer CoT (Gemini-2.0-flash, noisy) | 30.7% | 0.54 |
+| v0.3-filtered | Correctness-filtered CoT (kishanvavdara) | — | 0.50 — test set has 14 categories, training covered only 6 |
+| v0.4-huikang-r1 | Huikang corpus, 15,979 problems, seq=8192 | — | 0.49 — system prompt mismatch |
+| v0.4-huikang-r2 | + system prompt fix | — | 0.50 — system/augmenter contradiction (53% of test scored 0) |
+| v0.4-huikang-r3 | + empty system + stripped placeholder | — | *in progress* |
 
 ![Training comparison v0.1-baseline vs v0.2-cot](docs/images/training_comparison_v01_v02.png)
 ![v0.3 training curves](docs/images/training_v03.png)

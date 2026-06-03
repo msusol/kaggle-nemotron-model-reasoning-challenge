@@ -100,6 +100,8 @@ RUN TORCH_CUDA_ARCH_LIST="8.0;8.6;8.7;8.9;9.0;12.0;12.1+PTX" \
     pip install mamba-ssm --no-binary mamba-ssm --no-build-isolation \
  && python3 -c "f='/usr/local/lib/python3.12/dist-packages/mamba_ssm/ops/selective_scan_interface.py'; c=open(f).read(); needle='\nimport selective_scan_cuda\n'; open(f,'w').write(c.replace(needle,'\ntry:\n    import selective_scan_cuda\nexcept ImportError:\n    selective_scan_cuda = None\n',1)) if needle in c else None"
 
+RUN pip install mergekit llm-blender
+
 RUN pip install scikit-build-core
 # Build bitsandbytes to /opt/bitsandbytes (not /workspace) so the -v /workspace mount
 # at runtime doesn't hide the source. Use non-editable install so compiled .so files

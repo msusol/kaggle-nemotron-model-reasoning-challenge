@@ -1,0 +1,28 @@
+base_model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
+init_adapter: output/adapter_huikang_v4r3_20260602_142413
+train_file: data/v0.4_train.jsonl
+output_dir: output/adapter
+
+# LoRA — must match init adapter's parameter space
+lora_r: 32
+lora_alpha: 32
+lora_dropout: 0.05
+target_modules: "q_proj|k_proj|v_proj|o_proj|in_proj|out_proj|up_proj|down_proj"
+
+# GRPO generation
+num_generations: 8          # group size for relative reward
+temperature: 0.7            # diversity within group
+max_new_tokens: 6144        # p75 CoT length; 8 × 6144 fits 121 GB
+max_prompt_length: 2048     # competition prompts are short
+
+# Training
+learning_rate: 1.0e-6       # RL fine-tuning needs lower LR than SFT
+num_epochs: 3               # community: 3 epochs gives large boost on bit_manipulation
+batch_size: 1               # one problem per step; 8 generations before backward
+grad_accum: 1               # no accumulation needed — generation is the bottleneck
+kl_coeff: 0.04              # DeepSeek-R1 default; tune if reward hacking observed
+warmup_ratio: 0.05
+
+# Memory / hardware
+use_4bit: false             # blocked: broken for NemotronH MoE experts
+gradient_checkpointing: false  # NemotronH raises ValueError on HF GC enable

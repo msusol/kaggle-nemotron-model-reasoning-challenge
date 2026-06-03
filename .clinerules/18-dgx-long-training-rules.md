@@ -1,100 +1,101 @@
-# Remote DGX training rules
+# DGX Long Training Rules — nemotron-gb10
 
-## When starting long-running training jobs
+This project trains Nemotron-3-Nano-30B on a DGX Spark (GB10, 128 GB unified memory)
+using the `nemotron-gb10:latest` Docker image. Training runs take **12–16 hours**.
 
-- You are working on a DGX server over SSH. SSH connections and VS Code / Claude sessions may drop unexpectedly.
-- Never start long-running training jobs directly in a plain interactive shell tied to the SSH connection.
-- Instead, ALWAYS start training runs inside a tmux session running inside the Docker container.
+## Always use tmux — never run_in_background
 
-### tmux pattern inside container
+Do NOT invoke `bash scripts/run_train.sh` with `run_in_background: true` in the Bash
+tool. The background task runner holds the stdout pipe; when it dies, the log stops
+updating even though Docker keeps training for hours with no visibility.
 
-- When the user asks you to start a training run (for example, running `scripts/run_train.sh`),
-  do NOT run the script directly.
-- Instead, run this pattern, substituting the actual container name and RUN_NAME:
+**Always tell the user to run training themselves:**
 
-  ```bash
-  docker exec -it <container_name> tmux new -d -s train \
-    "RUN_NAME=<run_name> bash scripts/run_train.sh"
-  ```
+```bash
+tmux new -s train
+RUN_NAME=<name> bash scripts/run_train.sh
+# Ctrl+B then D to detach — session survives SSH drops
+# tmux attach -t train to reattach
+```
 
-- After starting the training session, print clear instructions for how to reattach later, e.g.:
+The log is written to `output/train_<RUN_NAME>_<timestamp>.log` via `tee` inside
+`run_train.sh`. As long as tmux keeps the shell alive, the log stays live.
 
-  ```text
-  To reattach after an SSH drop:
-    ssh <dgx-host>
-    docker exec -it <container_name> tmux attach -t train
-  ```
+To follow it from another terminal:
+```bash
+tail -f output/train_<RUN_NAME>_<timestamp>.log
+```
 
-### If tmux is not available
+## Never kill a running nemotron-gb10 container without asking
 
-- If `tmux` is not installed or the command fails, fall back to using `nohup` plus log files:
+`nemotron-gb10:latest` training runs take 12–16 hours. Killing one wastes the full run.
+Always confirm with the user before issuing `docker stop` or `docker kill`.
 
-  ```bash
-  nohup RUN_NAME=<run_name> bash scripts/run_train.sh \
-    > logs/<run_name>.out 2>&1 &
-  echo $! > logs/<run_name>.pid
-  ```
-
-- After starting the process with `nohup`, tell the user exactly how to monitor and manage it:
-
-  ```text
-  To follow logs:
-    tail -f logs/<run_name>.out
-
-  To stop the run:
-    kill $(cat logs/<run_name>.pid)
-  ```
-
-### General constraints
-
-- Assume SSH connections may drop at any time; prefer patterns that keep processes alive independently of the SSH session.
-- After starting a job, always confirm:
-  - The exact command you ran.
-  - Where logs will go (tmux session name or logfile path).
-  - How the user can resume monitoring after reconnecting.
-
-## Never use run_in_background for training scripts
-
-Do NOT invoke `bash scripts/run_train.sh` (or any long Docker training command) with
-`run_in_background: true` in the Bash tool. The background task runner holds the stdout
-pipe; when killed (timeout, session end, user interrupt), the pipe breaks and the log
-file stops updating — even though training continues inside Docker for hours unmonitored.
-
-Always instruct the user to run training themselves in tmux (see pattern above).
-
-## Never kill a running training container without asking
-
-Before issuing `docker stop` or `docker kill` on a nemotron-gb10 container, confirm
-with the user. Training runs are 12–16 hours; killing one wastes the full run.
-
-Check what's running first:
+Check what is running first:
 ```bash
 docker ps --filter "ancestor=nemotron-gb10:latest"
 nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader
 ```
 
-## Diagnosing a silent/stalled run
+## How to start a training run correctly
 
-If the log file stops updating, do NOT assume training crashed. Check in order:
+```bash
+# From the project root, inside a tmux session:
+tmux new -s train
+RUN_NAME=huikang_v4r3 bash scripts/run_train.sh
+
+# The script handles everything:
+#   - pauses nginx-proxy and rnaseq-server containers
+#   - GPU pre-flight check (aborts if > 1 GB stale allocations)
+#   - sets VM tuning (vfs_cache_pressure, min_free_kbytes)
+#   - launches nemotron-gb10:latest with --privileged -e NVIDIA_VISIBLE_DEVICES=all
+#   - writes log to output/train_<RUN_NAME>_<timestamp>.log
+#   - resumes paused containers on exit
+```
+
+## Diagnosing a silent run (log stopped updating)
+
+Do NOT assume training crashed. Check in this order:
 
 1. **Container still running?**
    ```bash
    docker ps --filter "ancestor=nemotron-gb10:latest"
    ```
-2. **GPU actively computing?** (>80% = training; 0% = stalled or done)
+
+2. **GPU actively computing?** (>80% = training; 0% = done or stalled)
    ```bash
    nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader
    ```
-3. **Process still alive and accumulating CPU time?**
-   ```bash
-   docker exec <id> ps aux | grep train_lora
-   ```
-   Run twice 30s apart — CPU time column should increase.
 
-4. **Attach for live output** (detach with `Ctrl+P Ctrl+Q` — never `Ctrl+C`):
+3. **Process alive and accumulating CPU time?**
+   ```bash
+   docker exec <container_id> ps aux | grep train_lora
+   ```
+   Run twice 30s apart — the CPU TIME column must increase.
+
+4. **Reattach for live output** — detach with `Ctrl+P Ctrl+Q`, never `Ctrl+C`:
    ```bash
    docker attach <container_id>
    ```
 
-If GPU >80% and CPU time growing: training is running, log pipe just broke. Estimate
-current step: `(elapsed_seconds) / ~50s_per_step`. Do not restart.
+If GPU >80% and CPU time is growing: training is running fine, only the log pipe broke.
+
+Estimate current step:
+```
+elapsed_seconds ÷ ~50s/step  (at seq_len=8192, batch_size=1, grad_accum=16)
+```
+
+Do not restart. Wait for the container to exit naturally; the adapter saves to
+`output/adapter_<RUN_NAME>_<timestamp>/` on completion.
+
+## If tmux is not available inside the container
+
+Fall back to `nohup` on the host:
+```bash
+nohup RUN_NAME=<name> bash scripts/run_train.sh \
+  > output/train_<name>_nohup.log 2>&1 &
+echo $! > output/train_<name>.pid
+```
+
+Monitor: `tail -f output/train_<name>_nohup.log`
+Stop: `kill $(cat output/train_<name>.pid)`

@@ -14,5 +14,8 @@ data/nemo_dataset/nemo_train.jsonl
 data/nemo_dataset/nemo_valid.jsonl
 data/nemo_dataset/valid_labels.jsonl
 data/v0.1_train.csv
+data/v0.5_train.jsonl
 .paused_containers
 .idea/
+submission.zip
+submission/

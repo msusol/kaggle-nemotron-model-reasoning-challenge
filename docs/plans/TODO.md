@@ -145,25 +145,46 @@ Two confirmed bugs caused the 0.49 regression despite 94.47% token accuracy:
 - [ ] Fix `extract_huikang_corpus.py`: strip `\boxed{–}` placeholder pattern from responses
 - [ ] Re-run extraction → retrain → resubmit to confirm regression is fixed
 
-## Phase 6 — v0.5 (GRPO self-improvement)
+## Phase 5 — v0.5 SFT (kuangyicheng approach)
+
+See `docs/plans/v0.5-sft-kuangyicheng-plan.md` (plan file) and
+`docs/investigate/v0.4r3-training-data-alignment.md` (root cause analysis).
+
+Warmstart from huikang v27 adapter + 240 steps on competition CSV + synthetic short
+responses. Matches the 0.87 notebook approach exactly.
+
+- [x] Pull 0.87 notebook source: `kaggle kernels pull kuangyicheng/nemotron-087-training`
+- [x] Write `scripts/prepare_v5_sft_data.py` — competition CSV + synthetic generators
+- [x] Generate `data/v0.5_train.jsonl` (21,500 rows) ✓ spot-check passed
+- [x] Download `huikang/nemotron-adapter/Transformers/default/27` → `output/adapter_huikang_v27/`
+- [x] Patch `adapter_config.json` — set `base_model_name_or_path`
+- [x] Write `scripts/train_v5_sft.py` + `scripts/run_train_v5.sh`
+- [ ] Run training (tmux): `tmux new -s train_v5 && RUN_NAME=v5_sft bash scripts/run_train_v5.sh`
+- [ ] Package and submit; record in leaderboard
+- [ ] If score ≥ 0.85 → proceed to v0.6 GRPO
+
+## NeMo dataset refresh (defer until after v0.5 SFT scores)
+
+See `docs/plans/v0.5-nemo-framework-plan.md`.
+
+- [ ] Update `scripts/run_convert_jsonl_to_nemo.sh` to use `data/v0.5_train.jsonl`
+- [ ] Tokenize: `bash scripts/run_convert_jsonl_to_nemo.sh` → `data/nemo_dataset/nemo_v5_train.jsonl`
+- [ ] Delete old dataset: `kaggle datasets delete gdataranger/huikang-nemotron-nemo-sft-r32 -y`
+- [ ] Create new dataset: `gdataranger/nemotron-v5-competition-nemo-sft`
+
+## Phase 6 — v0.6 GRPO (self-improvement)
 
 See `docs/plans/v0.6-grpo-plan.md` for algorithm background and memory budgets.
-See `docs/plans/v0.5-huikang-v26-adapter-plan.md` for init adapter details.
+Init from v0.5 adapter once it scores.
 
-**Init adapter**: `output/adapter_huikang_v26/` (1.5 GB, all-linear, ~0.85 quality)
-downloaded from `andreyyunoshev/huikang-nemotron-adapter-mirror` (CC0-1.0). Use
-`target_modules="all-linear"` in GRPOConfig to match adapter parameter space.
-
-- [x] Download `adapter_huikang_v26`; patch `base_model_name_or_path` in config
 - [ ] Add `mergekit` to `Dockerfile.gb10`; rebuild `nemotron-gb10:latest`
 - [ ] Confirm `from trl import GRPOTrainer` works in rebuilt image
-- [ ] Write `scripts/train_grpo.py` — init from v26; `target_modules="all-linear"`
+- [ ] Write `scripts/train_grpo.py` — init from v0.5 adapter
 - [ ] Write `configs/nemotron_grpo.yaml` — LR=1e-6, N=8, max_new_tokens=6144, kl_coeff=0.04
 - [ ] Write `scripts/run_grpo.sh`
-- [ ] Test run: 50 steps on 100 problems — verify reward signal > 0 across all 14 categories
-- [ ] Full run: `RUN_NAME=grpo_v5_v26 bash scripts/run_grpo.sh`
+- [ ] Test run: 50 steps on 100 problems — verify reward signal > 0
+- [ ] Full run: `RUN_NAME=grpo_v6 bash scripts/run_grpo.sh`
 - [ ] Validate, package, submit; record in leaderboard
-- [ ] Confirm v0.4 dataset published (Rule 6 lineage) before any v0.5 submission
 
 ## Infrastructure (complete)
 - [x] `Dockerfile.gb10` (26.04) — current primary image for all training runs

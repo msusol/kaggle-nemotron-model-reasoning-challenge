@@ -24,3 +24,4 @@ Project rules are in [.clinerules/](.clinerules/):
 - [15-citations.md](.clinerules/15-citations.md) — Use `[cite:N]` inline; register in `docs/plans/CITATIONS.md`; number = max existing + 1
 - [16-readme-sync.md](.clinerules/16-readme-sync.md) — Update README.md layout and commands when scripts, data files, or Dockerfiles change
 - [17-leaderboard.md](.clinerules/17-leaderboard.md) — Update `docs/plans/leaderboard.md` after each completed training run and validation pass
+- [18-dgx-long-training-rules.md](.clinerules/18-dgx-long-training-rules.md) — Always use tmux for training; never run_in_background; broken pipe diagnosis

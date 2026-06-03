@@ -147,17 +147,59 @@ With `low_cpu_mem_usage=True` the meta-device path is used: the model is initial
 
 > **Note:** `low_cpu_mem_usage=True` is set in `train_lora.py`. Do not remove it.
 
-### Page cache drop before training — secondary hygiene
+### Pre-training memory clearing sequence — full ordered steps
 
-`run_train.sh` also drops the Linux page cache before loading (separate from the GPU pre-flight):
+The order of operations matters. Running these steps out of order can cause spurious
+preflight passes (the preflight sees stale allocations that were already removed) or leave
+the preflight container's own CUDA context in memory when training starts.
+
+Correct sequence (implemented in both `run_train.sh` and `run_train_v5.sh`):
+
+| Step | Command | Why |
+|---|---|---|
+| 1. Stop gnome-remote-desktop | `systemctl --user stop gnome-remote-desktop.service` | Frees ~6 GB GPU HBM held by its CUDA context |
+| 2. Pause services | `bash scripts/services.sh pause` | Stops NIM/other containers; reduces CPU/IO competition |
+| 3. Stage-1 GPU check | `nvidia-smi --query-compute-apps` | Fast check — catches any running compute process > 1 GB |
+| 4. Remove stale container | `docker rm -f nemotron-trainer[-v5]` | Releases the dead container's filesystem overlay; must happen **before** preflight so preflight sees the post-cleanup GPU state, not pre-cleanup |
+| 5. `drop_caches` pass 1 | `echo 3 > /proc/sys/vm/drop_caches` | Clears NIM/stopped-container file-backed pages from Linux RAM so the torch preflight threshold check isn't confused by RAM pressure |
+| 6. Torch preflight | `torch.cuda.init(); torch.cuda.empty_cache()` | Initialising a new CUDA context forces the driver to GC orphaned HBM allocations from dead containers; 12 GB threshold |
+| 7. `nvidia_uvm` reload (if needed) | `rmmod nvidia_uvm && modprobe nvidia_uvm` | Last resort if preflight still reports > 12 GB used after step 4–6 |
+| 8. `drop_caches` pass 2 | `echo 3 > /proc/sys/vm/drop_caches` | Clears the ~8 GB CUDA context the preflight container itself added; this is the definitive baseline training will see |
+| 9. Start training | `ionice -c 2 -n 7 docker run ...` | `ionice` lowers I/O scheduling priority; safetensors shard reads compete less aggressively with other host I/O |
+
+**Why two `drop_caches` passes?** The first pass clears the pre-existing page cache so
+the preflight threshold check is not confused. The preflight container then allocates a
+fresh CUDA context (~8 GB HBM) and re-reads some model files. The second pass clears
+those additions. Without it, training starts with an extra ~8 GB already consumed.
+
+**Why `docker rm -f` before preflight?** A SIGKILL'd container holds 6–8 GB of driver-level
+HBM allocations. `docker rm -f` removes the container record; the driver then releases
+those allocations when the preflight opens a new CUDA context. If you run the preflight
+first, it sees the stale allocations, may trigger the `nvidia_uvm` reload unnecessarily,
+and then `docker rm -f` removes allocations the reload already handled — wasted steps.
+
+### Page cache drop — Linux RAM hygiene
+
+Each `drop_caches` pass (steps 5 and 8 above) is run via a privileged Alpine container:
 
 ```bash
-docker run --rm --privileged alpine sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+docker run --rm --privileged -v /:/host alpine sh -c \
+  'echo 3 > /proc/sys/vm/drop_caches \
+   && echo 1048576 > /proc/sys/vm/min_free_kbytes \
+   && echo 500 > /proc/sys/vm/vfs_cache_pressure \
+   && swapoff /host/swap.img 2>/dev/null; swapon /host/swap.img 2>/dev/null; true'
 ```
 
-This is secondary hygiene — the Linux RAM pool is separate from GPU HBM and page cache alone will not cause a loading OOM. It does however keep the Linux pool clean so other processes on the system are not disrupted during the ~6-minute loading window.
+- `drop_caches=3` — drops page cache, dentries, and inodes
+- `min_free_kbytes=1048576` (1 GB) — nudges the kernel to proactively reclaim file-backed
+  pages before they crowd out CUDA allocations during the loading window
+- `vfs_cache_pressure=500` — makes file-backed page eviction 5× more aggressive
+- `swapoff/swapon` — recycles swap to reclaim pages pushed there by prior OOM-killed runs
 
-**Swap accumulation** from prior OOM-killed runs can push a few GB of pages to disk. `run_train.sh` attempts `sudo -n swapoff -a && swapon -a` before training; if that fails (sudo requires a password interactively), run it manually:
+Defaults are restored after training: `min_free_kbytes=45166`, `vfs_cache_pressure=100`.
+
+**Swap accumulation** from prior OOM-killed runs can push a few GB of pages to disk. If the
+`swapoff/swapon` inside the Alpine container fails (e.g., swap file path differs), run manually:
 
 ```bash
 sudo swapoff -a && sudo swapon -a
@@ -226,6 +268,8 @@ The state file `.paused_containers` is gitignored.
 
 ## Launch a training run
 
+### v0.4 (huikang corpus SFT) — `run_train.sh`
+
 ```bash
 RUN_NAME=huikang_v4 bash scripts/run_train.sh
 ```
@@ -237,6 +281,25 @@ Config is loaded from `configs/nemotron.yaml` via `scripts/load_config.sh`. Over
 ```bash
 RUN_NAME=test LEARNING_RATE=1e-5 MAX_SEQ_LENGTH=4096 bash scripts/run_train.sh
 ```
+
+### v0.5 (kuangyicheng warmstart SFT) — `run_train_v5.sh`
+
+```bash
+# Always inside a tmux session — survives SSH disconnect
+tmux new -s train_v5    # or: tmux attach -t train_v5
+RUN_NAME=v5_sft bash scripts/run_train_v5.sh
+```
+
+Logs go to `output/train_v5_sft.log`. Adapter saved to `output/adapter_v5_sft/`.
+
+Key differences from `run_train.sh`:
+- Warmstarts from `output/adapter_huikang_v27/` (huikang v27 PEFT adapter)
+- Invokes `scripts/train_v5_sft.py` (not `train_lora.py`)
+- 240 steps at `max_seq_length=6144` (short responses, not full huikang corpus)
+- All memory clearing steps identical to `run_train.sh` (full preflight, two `drop_caches` passes)
+
+**Prerequisite:** `output/adapter_huikang_v27/` and `data/v0.5_train.jsonl` must exist.
+Generate the dataset: `python scripts/prepare_v5_sft_data.py`
 
 ### Signs of OOM kill
 

@@ -161,6 +161,23 @@ def main():
             n_cast += 1
     print(f"Cast {n_cast} LoRA param tensors to fp32", flush=True)
 
+    # Enable gradient checkpointing via NemotronH's native GradientCheckpointingLayer.
+    # NemotronHForCausalLM.supports_gradient_checkpointing=False blocks the standard
+    # gradient_checkpointing_enable() path, but _set_gradient_checkpointing() is fully
+    # implemented and walks all modules that inherit GradientCheckpointingLayer.
+    # SFTConfig must keep gradient_checkpointing=False so SFTTrainer does not call
+    # gradient_checkpointing_enable() again and raise the ValueError.
+    import functools
+    _gc_func = functools.partial(torch.utils.checkpoint.checkpoint, use_reentrant=False)
+    try:
+        model.base_model.model._set_gradient_checkpointing(
+            enable=True, gradient_checkpointing_func=_gc_func
+        )
+        model.enable_input_require_grads()
+        print("Gradient checkpointing enabled (NemotronH native, use_reentrant=False)", flush=True)
+    except Exception as _e:
+        print(f"Warning: gradient checkpointing unavailable: {_e}", flush=True)
+
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
     print(f"Trainable: {trainable:,} / Total: {total:,}", flush=True)
@@ -265,7 +282,7 @@ def main():
         logging_steps=10,
         save_strategy="no",
         bf16=True,
-        gradient_checkpointing=True,
+        gradient_checkpointing=False,       # GC enabled manually above via _set_gradient_checkpointing()
         gradient_checkpointing_kwargs={"use_reentrant": False},
         dataloader_num_workers=2,
         remove_unused_columns=False,

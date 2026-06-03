@@ -35,6 +35,29 @@ Used purely at **data generation time** — produces training data that is then 
 
 ---
 
+## Oracle quality reference
+
+A community benchmark (jiazhuang, [discussion #684283](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/684283)) tested 10 frontier LLMs zero-shot on the competition training sample using the official prompt format. Full analysis: `docs/investigate/mainstream-llm-baseline-benchmark.md`.
+
+**Key results:**
+
+| Model | Think | Score |
+|---|---|---|
+| Gemini-3.1-Pro | ✅ | 0.81 |
+| Claude-Opus-4.6 | ✅ | 0.78 |
+| DeepSeek-V3.2 | ✅ | 0.74 |
+| Kimi-K2.5 / Qwen3-Max | ✅ | 0.72 |
+| Claude-Sonnet-4.5 | ❌ | 0.51 |
+| GPT-5.4 | ❌ | 0.36 |
+
+**Implications for oracle selection:**
+
+1. **Thinking mode is required.** The gap between best thinking (0.81) and best non-thinking (0.51) model is 0.30. Non-thinking models produce lower-quality reasoning traces and should not be used as data generation oracles.
+2. **`nvidia/llama-3.1-nemotron-70b-instruct` is not in this benchmark.** Its quality relative to these models is unknown. For long-CoT use cases, Claude-Opus-4.6 or DeepSeek-V3.2 are empirically stronger oracles if accessible via another API.
+3. **Claude Opus outputs need postprocessing.** Opus emits rigorous LaTeX inside `\boxed{}` (escaped spaces, `\text{}` wrappers, appended units) that fails the official evaluator's string comparison. Apply `latex_postprocess()` from `notebook/mainstream-llm-performance-comparison.ipynb` (cell 25) to any Opus-generated training labels before storing them.
+
+---
+
 ## API setup
 
 ```python
@@ -86,6 +109,11 @@ kuangyicheng used, potentially improving generalisation.
 Run each of the 9,500 competition problems through the API with a long-CoT prompt to
 produce fresh reasoning traces without Tinker's format quirks (`\boxed{–}`, empty system
 fields). This would be a clean replacement for `samvalladares/huikang-nemotron-artifacts`.
+
+**Oracle requirement:** Use a thinking-enabled model (see Oracle quality reference above).
+`nvidia/llama-3.1-nemotron-70b-instruct` is the primary candidate via the NVIDIA API.
+If using Claude-Opus-4.6 for higher oracle quality, apply `latex_postprocess()` to
+extracted answers before writing training labels (see postprocessing note above).
 
 **Caveat:** Long-CoT responses still hit Kaggle's `max_new_tokens` limit at eval time.
 Only useful if the intent is to test whether the 0.85 score can be improved further with
@@ -140,6 +168,12 @@ A `scripts/generate_api_data.py` script with retry/backoff + rate limiting would
 #       --output data/v_api_train.jsonl \
 #       --model nvidia/llama-3.1-nemotron-70b-instruct \
 #       --response-style short   # or: long-cot
+#
+# Answer extraction: use extract_final_answer() + latex_postprocess() from
+# notebook/mainstream-llm-performance-comparison.ipynb (cells 24-25).
+# Required for Opus-class oracles; harmless for all others.
+# Scoring: use verify() from the same notebook (math.isclose rel_tol=1e-2
+# for numeric, case-insensitive string match for text).
 ```
 
 ---

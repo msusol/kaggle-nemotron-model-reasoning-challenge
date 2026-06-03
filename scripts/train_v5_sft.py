@@ -209,7 +209,7 @@ def main():
         learning_rate=args.learning_rate,
         lr_scheduler_type="linear",
         warmup_steps=0,
-        max_length=args.max_seq_length,
+        max_seq_length=args.max_seq_length,
         adam_beta1=0.9,
         adam_beta2=0.95,
         adam_epsilon=1e-8,

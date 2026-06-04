@@ -19,24 +19,40 @@ import argparse
 import csv
 import functools
 import math
-import pathlib
 import re
 import sys
+import types
 import threading
 import warnings
 from datetime import datetime
 from pathlib import Path
 
-# Patch judges.py before TRL import — llm_blender imports TRANSFORMERS_CACHE which
-# was removed in transformers 5.5.3. pip uninstall leaves the directory, so
-# is_llm_blender_available() still returns True. Wrap the import in try/except.
-_judges = pathlib.Path("/usr/local/lib/python3.12/dist-packages/trl/trainer/judges.py")
-if _judges.exists():
-    _c = _judges.read_text()
-    _old = "\nimport llm_blender\n"
-    _new = "\ntry:\n    import llm_blender\nexcept Exception:\n    llm_blender = None\n"
-    if _old in _c and _new not in _c:
-        _judges.write_text(_c.replace(_old, _new, 1))
+# Inject a stub llm_blender into sys.modules BEFORE importing TRL.
+# llm_blender internally imports TRANSFORMERS_CACHE which was removed in
+# transformers 5.5.3, causing GRPOTrainer to fail to import. File-patching
+# judges.py fails because the container runs as non-root. Injecting a stub
+# module is safe — we never call any llm_blender functions.
+import importlib.machinery
+
+def _make_stub(name: str) -> types.ModuleType:
+    m = types.ModuleType(name)
+    m.__spec__ = importlib.machinery.ModuleSpec(name, loader=None)
+    m.__path__ = []
+    return m
+
+for _stub_name in (
+    "llm_blender", "llm_blender.blender",
+    "llm_blender.blender.blender", "llm_blender.blender.blender_utils",
+    "vllm", "vllm.lora", "vllm.lora.request",
+):
+    if _stub_name not in sys.modules:
+        sys.modules[_stub_name] = _make_stub(_stub_name)
+
+# grpo_trainer.py does `from vllm import LLM, SamplingParams` when is_vllm_available().
+# Our stub makes it available, so add sentinel attrs — GRPOTrainer never uses them
+# when use_vllm=False.
+sys.modules["vllm"].LLM = None
+sys.modules["vllm"].SamplingParams = None
 
 warnings.filterwarnings("ignore", message=r".*save_embedding_layers.*")
 warnings.filterwarnings("ignore", message=r".*Could not find a config file.*")
@@ -98,13 +114,14 @@ def _make_cache_dropper(interval: float = 30.0):
     return stop
 
 
+import torch
+from datasets import Dataset
+from peft import PeftModel
+from trl import GRPOConfig, GRPOTrainer
+
+
 def main():
     args = parse_args()
-
-    import torch
-    from datasets import Dataset
-    from peft import PeftModel
-    from trl import GRPOConfig, GRPOTrainer
 
     torch.manual_seed(args.seed)
 

@@ -213,19 +213,23 @@ def main():
         return rewards
 
     # ── GRPO config ──────────────────────────────────────────────────────────
+    # TRL 0.15.2 GRPOTrainer requires global_batch_size % num_generations == 0.
+    # global_batch_size = per_device_train_batch_size × num_processes (1 GPU = 1).
+    # Simplest valid config: per_device_train_batch_size = num_generations.
+    # Each step: one problem, N completions generated and compared for advantage.
     grpo_config = GRPOConfig(
         output_dir=args.output_dir,
         num_train_epochs=1,
         max_steps=args.num_steps,
-        per_device_train_batch_size=args.batch_size,
+        per_device_train_batch_size=args.num_generations,  # must equal num_generations
         learning_rate=args.learning_rate,
         lr_scheduler_type="cosine",
         warmup_steps=20,
         num_generations=args.num_generations,
-        max_completion_length=args.max_new_tokens,  # TRL 0.15.2 name
-        max_prompt_length=1024,                     # competition prompts can be long
+        max_completion_length=args.max_new_tokens,
+        max_prompt_length=1024,
         temperature=0.7,
-        beta=args.kl_coeff,                         # TRL 0.15.2 name for kl_coeff
+        beta=args.kl_coeff,
         bf16=True,
         gradient_checkpointing=False,
         logging_steps=5,

@@ -242,8 +242,7 @@ def main():
     )
 
     # GRPOTrainer sets model.warnings_issued["estimate_tokens"] = True at init.
-    # NemotronHForCausalLM doesn't have this attribute (standard in GenerationMixin
-    # but absent here). Add it on the PeftModel instance so the assignment lands.
+    # NemotronHForCausalLM doesn't have this attribute — add it.
     if not hasattr(model, "warnings_issued"):
         model.warnings_issued = {}
 
@@ -254,6 +253,12 @@ def main():
         args=grpo_config,
         train_dataset=dataset,
     )
+
+    # TRL 0.15.2 _get_train_sampler() takes no arguments, but transformers 5.5.3
+    # Trainer.get_train_dataloader() now calls sampler_fn(dataset). Patch the
+    # method to accept and ignore the extra positional argument.
+    _orig_sampler = trainer._get_train_sampler
+    trainer._get_train_sampler = lambda dataset=None: _orig_sampler()
 
     print("Starting GRPO training...", flush=True)
     trainer.train()

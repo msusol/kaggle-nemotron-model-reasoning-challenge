@@ -704,3 +704,130 @@ a no-op anyway (v27 does not include lm_head LoRA) and is not needed.
 | kuangyicheng (Modal.com, Unsloth, full training) | **0.87/0.88** | All layers trained jointly |
 | kuangyicheng Kaggle notebook run | 0.62 | Same gap as our setup — PeftModel drops MoE keys |
 | Our v0.5-sft (standard PEFT) | 0.56 | Same root cause + additional training bugs fixed late |
+
+---
+
+## 11. What Unsloth actually does to Nemotron-H — confirmed from live training run
+
+**Date:** 2026-06-03  
+**Source:** `output/train_v5_sft_unsloth.log` — first GB10 training run with `FastLanguageModel`
+
+### Unsloth has native Nemotron-H support
+
+Running `FastLanguageModel.from_pretrained` on the GB10 with `nemotron-gb10:latest`
+(Unsloth 2026.6.1) printed:
+
+```
+🦥 Unsloth 2026.6.1: Fast Nemotron_H patching. Transformers: 5.5.3.
+   NVIDIA GB10. Num GPUs = 1. Max memory: 121.689 GB.
+```
+
+`Fast Nemotron_H patching` confirms Unsloth has a dedicated patch for this architecture.
+It does not fall back to a generic model handler.
+
+### How Unsloth exposes MoE experts as individual LoRA targets
+
+Standard transformers stores MoE expert weights as a single batched 3-D tensor:
+
+```python
+model.backbone.layers[i].mixer.experts   # shape: [128, d_ffn, d_model] — raw Parameter
+```
+
+Unsloth patches this into **128 individual `nn.Linear` modules**, one per expert:
+
+```
+model.backbone.layers[i].mixer.experts[0].up_proj    # nn.Linear
+model.backbone.layers[i].mixer.experts[0].down_proj  # nn.Linear
+model.backbone.layers[i].mixer.experts[1].up_proj    # nn.Linear
+...
+model.backbone.layers[i].mixer.experts[127].down_proj # nn.Linear
+```
+
+This makes all 128 experts visible to PEFT's `get_peft_model`, which walks
+`named_modules()` and adds LoRA A/B matrices to every `nn.Linear` it finds.
+
+### Key count and parameter comparison
+
+| | Standard PEFT (v0.5-sft) | Unsloth (v0.5-sft-unsloth) |
+|---|---|---|
+| LoRA tensors saved | 232 | ~12,008 |
+| LoRA modules | 116 | ~6,004 |
+| Trainable parameters | 27,711,488 (27.7M) | 883,873,792 (883M) |
+| Adapter size | 105.7 MB | ~1.5 GB (expected) |
+| Step time | ~14 s/step | ~93 s/step |
+| Total training time | ~57 min | ~6 hours |
+
+The 32× increase in trainable parameters comes entirely from the MoE expert layers:
+128 experts × 2 (up/down) × 52 MoE blocks × 2 (lora_A + lora_B) = ~27,000 new tensors.
+The remaining ~1,000 tensors are attention, output, and Mamba projection layers.
+
+### Model path change: `model.layers` → `backbone.layers`
+
+Unsloth also renames the internal model path. Standard PEFT keys use:
+
+```
+base_model.model.model.layers.X.mixer.q_proj.lora_A.default.weight
+```
+
+Unsloth keys use:
+
+```
+base_model.model.backbone.layers.X.mixer.experts.N.up_proj.lora_A.default.weight
+```
+
+Note `model.backbone.layers` vs `model.model.layers`. This is why the lm_head rename
+(`model.lm_head` → `model.backbone.lm_head`) in the original notebook was needed for
+the vLLM inference path — Unsloth renames the entire model hierarchy.
+
+### Why v27's MoE expert keys still don't load
+
+v27 was saved by an older Unsloth that stored batched expert weights as:
+```
+base_model.model.model.layers.X.mixer.experts.w1.lora_A.weight
+base_model.model.model.layers.X.mixer.experts.w2.lora_A.weight
+base_model.model.model.layers.X.mixer.experts.w3.lora_A.weight
+```
+
+Current Unsloth exposes individual experts:
+```
+base_model.model.backbone.layers.X.mixer.experts.0.up_proj.lora_A.default.weight
+...
+base_model.model.backbone.layers.X.mixer.experts.127.down_proj.lora_B.default.weight
+```
+
+Two mismatches:
+1. **Module path**: `model.model.layers` vs `model.backbone.layers`
+2. **Expert format**: batched `w1/w2/w3` vs individual `experts.N.up_proj/down_proj`
+3. **Key format**: `lora_A.weight` (no `.default.`) vs `lora_A.default.weight`
+
+Result: the ~12,008 new expert LoRA modules **initialize fresh** (lora_B=0 = identity
+pass-through at step 0). The ~186 attention layer keys DO load from v27 (standard paths
+still match). So the training warmstarts from v27 for attention layers and trains MoE
+expert LoRA from scratch.
+
+### Training implications
+
+Fresh MoE LoRA with lora_B=0 is not a problem — it means the experts start as exact
+pass-through of base model weights at step 0. As training progresses, the optimizer
+adjusts both attention LoRA (from v27 warmstart) and MoE expert LoRA (from identity)
+jointly. The joint gradient flow is what produces better attention LoRA quality, even if
+the expert LoRA updates are small after only 240 steps.
+
+This matches kuangyicheng's setup exactly: they also load v27 on top of Unsloth-patched
+model, get the same format mismatch for experts, and train jointly for 240 steps. The
+0.87/0.88 score confirms 240 steps is sufficient.
+
+### Kaggle compute options for this notebook
+
+| Platform | VRAM/RAM | Can run? | Notes |
+|---|---|---|---|
+| Kaggle T4 (free) | 16 GB VRAM | ❌ | 60 GB BF16 model won't load |
+| Kaggle T4 × 2 | 32 GB VRAM | ❌ | Still not enough for BF16 |
+| Kaggle A100 (limited) | 40 GB VRAM | ❌ BF16 / ⚠️ 4-bit | Needs `load_in_4bit=True`; QLoRA may fail |
+| Kaggle CPU (competition) | 96 GB RAM | ✅ slow | Tong confirmed; no GPU kernels; ~0.62 score |
+| Modal.com RTX PRO 6000 | 48 GB GDDR7 | ✅ | Full training → 0.87/0.88 |
+| Our GB10 | 130.7 GB HBM | ✅ | Full training → *pending score* |
+
+For GPU execution on Kaggle: change `load_in_4bit=False` → `load_in_4bit=True` to fit
+in T4 (15 GB VRAM). Untested — Unsloth's 4-bit may handle Nemotron-H's MoE differently
+than standard bitsandbytes (which is broken for this model). See `docs/plans/nvidia-api-data-generation-plan.md`.

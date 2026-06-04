@@ -129,13 +129,21 @@ def main():
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     print(f"Output: {args.output_dir}", flush=True)
 
-    # ── load model ──────────────────────────────────────────────────────────
+    # ── load model + SFT adapter via Unsloth ────────────────────────────────
+    # MUST use FastLanguageModel.from_pretrained(adapter_dir) — NOT base model
+    # + PeftModel.from_pretrained.  The v5_sft_unsloth adapter was saved by
+    # Unsloth with keys like `backbone.layers.X.mixer.in_proj.lora_A.weight`
+    # (no `.default.` adapter name, `backbone` not `model` in path).  Standard
+    # PeftModel.from_pretrained expects `model.layers.X.*.lora_A.default.weight`
+    # and silently reports ALL 12,008 keys missing → model trains from base
+    # weights, generates 1024-token CoT responses → OOM.
     _stop = _make_cache_dropper()
+    model = None
     try:
         from unsloth import FastLanguageModel
-        print(f"Loading via FastLanguageModel (Unsloth): {args.model_id}", flush=True)
-        base_model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=args.model_id,
+        print(f"Loading SFT adapter via FastLanguageModel: {args.adapter_dir}", flush=True)
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=args.adapter_dir,  # Unsloth reads adapter_config.json → loads base + adapter
             dtype=torch.bfloat16,
             load_in_4bit=False,
             full_finetuning=False,
@@ -145,9 +153,11 @@ def main():
         )
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
-        print("FastLanguageModel loaded — MoE layers patched", flush=True)
+        print("FastLanguageModel loaded with SFT adapter — MoE layers patched", flush=True)
     except Exception as e:
-        print(f"Unsloth unavailable ({e}), falling back to AutoModelForCausalLM", flush=True)
+        print(f"Unsloth load failed ({e}), falling back to base + PeftModel", flush=True)
+
+    if model is None:
         from transformers import AutoModelForCausalLM, AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(args.model_id)
         if tokenizer.pad_token is None:
@@ -156,9 +166,11 @@ def main():
             args.model_id, dtype=torch.bfloat16,
             device_map={"": 0}, low_cpu_mem_usage=True,
         )
+        model = PeftModel.from_pretrained(base_model, args.adapter_dir, is_trainable=True)
+
     _stop.set()
     torch.cuda.empty_cache()
-    print(f"Base model loaded. GPU free={torch.cuda.mem_get_info()[0]/1e9:.1f}GB", flush=True)
+    print(f"Model loaded. GPU free={torch.cuda.mem_get_info()[0]/1e9:.1f}GB", flush=True)
 
     # ── Mamba fast path ──────────────────────────────────────────────────────
     for name, mod in sys.modules.items():
@@ -167,17 +179,21 @@ def main():
             print("Mamba fast path enabled", flush=True)
             break
 
-    # ── load SFT adapter as init ─────────────────────────────────────────────
-    print(f"Loading SFT init adapter: {args.adapter_dir}", flush=True)
-    model = PeftModel.from_pretrained(base_model, args.adapter_dir, is_trainable=True)
-
+    # Make LoRA params trainable in fp32 (Unsloth loads adapter in inference_mode=True)
+    lora_count = 0
     for name, param in model.named_parameters():
         if ".lora_" in name:
+            param.requires_grad_(True)
             param.data = param.data.to(torch.float32)
+            lora_count += 1
+    print(f"LoRA params made trainable: {lora_count}", flush=True)
 
     _gc_func = functools.partial(torch.utils.checkpoint.checkpoint, use_reentrant=False)
     try:
-        model.base_model.model._set_gradient_checkpointing(
+        # Try PeftModel path first, fall back to base model direct call
+        _gc_target = getattr(model, "base_model", model)
+        _gc_target = getattr(_gc_target, "model", _gc_target)
+        _gc_target._set_gradient_checkpointing(
             enable=True, gradient_checkpointing_func=_gc_func
         )
         model.enable_input_require_grads()

@@ -3,6 +3,20 @@
 This project trains Nemotron-3-Nano-30B on a DGX Spark (GB10, 128 GB unified memory)
 using the `nemotron-gb10:latest` Docker image. Training runs take **12–16 hours**.
 
+---
+
+> **STOP — before any action involving training, submission, or GPU:**
+> Tell the user what command to run. Do NOT run it yourself.
+> This applies to ALL of the following — no exceptions:
+> - `tmux send-keys` or `tmux send` (still running it yourself)
+> - `bash scripts/run_*.sh` (run_grpo.sh, run_train*.sh, etc.)
+> - `bash scripts/services.sh` (pause/resume)
+> - `bash scripts/package_submission.sh`
+> - `docker run` for any training or submission container
+> - Any Bash tool call with `run_in_background: true` for training
+
+---
+
 ## Always use tmux — never run_in_background
 
 Do NOT invoke `bash scripts/run_train.sh` with `run_in_background: true` in the Bash

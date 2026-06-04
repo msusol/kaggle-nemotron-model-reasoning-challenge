@@ -139,7 +139,7 @@ def main():
             dtype=torch.bfloat16,
             load_in_4bit=False,
             full_finetuning=False,
-            trust_remote_code=True,
+            trust_remote_code=False,  # MUST be False — hub cache has buggy prepare_inputs_for_generation
             unsloth_force_compile=False,
             attn_implementation="eager",
         )

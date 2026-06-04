@@ -137,6 +137,34 @@ else:
     print('import_utils.py: needle not found')
 PYEOF
 
+# Unsloth — FastLanguageModel patches Nemotron-H's MoE expert tensors (batched
+# 3-D torch.Parameters) and Mamba projections as trainable nn.Linear-like LoRA
+# targets. Without this, PeftModel.from_pretrained(v27) silently drops ~232 of
+# v27's 418 adapter keys (mixer.experts.w1/w2/w3, gate_proj, x_proj), and those
+# layers train on base weights only → Kaggle score ~0.56 instead of ~0.87.
+# See docs/investigate/v0.5-unsloth-peft-key-mismatch.md for full root cause.
+#
+# Install strategy:
+#   --no-deps: prevents Unsloth from downgrading our pinned transformers==5.5.3,
+#   peft==0.14.0, trl==0.15.2, accelerate==1.3.0. Unsloth's dep range is
+#   compatible (its lower bounds are below our pins) but pip would still
+#   re-resolve and potentially downgrade. We skip compiled CUDA extras entirely
+#   (no [cu121], no [cu128]) — we need only FastLanguageModel's Python-level
+#   model patching, not the triton/flash-attn optimized kernels.
+#
+#   Re-pin after: force-reinstall critical packages to guarantee consistency
+#   even if a transitive dep tried to change them.
+#
+#   Smoke test: verify FastLanguageModel imports cleanly before continuing.
+RUN pip install unsloth unsloth_zoo --no-deps && \
+    pip install \
+        "transformers==5.5.3" \
+        "peft==0.14.0" \
+        "trl==0.15.2" \
+        "accelerate==1.3.0" \
+        --force-reinstall --no-deps && \
+    python3 -c "from unsloth import FastLanguageModel; print('Unsloth FastLanguageModel import OK')"
+
 RUN pip install scikit-build-core
 # Build bitsandbytes to /opt/bitsandbytes (not /workspace) so the -v /workspace mount
 # at runtime doesn't hide the source. Use non-editable install so compiled .so files

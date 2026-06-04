@@ -125,27 +125,55 @@ def main():
         print("Mamba fast path: module not found yet (will retry after model load)", flush=True)
 
     # ── load base model ─────────────────────────────────────────────────────────
-    print(f"Loading tokenizer: {args.model_id}", flush=True)
-    tokenizer = AutoTokenizer.from_pretrained(args.model_id)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    print(f"Loading base model: {args.model_id}", flush=True)
+    # Prefer FastLanguageModel (Unsloth) which patches MoE expert tensors and Mamba
+    # projections as trainable nn.Linear-like LoRA targets. Without this, PeftModel
+    # silently drops ~232 of v27's 418 adapter keys and only attention layers train.
+    # Falls back to AutoModelForCausalLM if Unsloth is not installed.
+    # See docs/investigate/v0.5-unsloth-peft-key-mismatch.md for full explanation.
+    _unsloth_loaded = False
     _stop_dropper = _make_cache_dropper(interval=20.0)
-    base_model = AutoModelForCausalLM.from_pretrained(
-        args.model_id,
-        dtype=torch.bfloat16,
-        device_map={"": 0},
-        low_cpu_mem_usage=True,
-    )
+    try:
+        from unsloth import FastLanguageModel
+        print(f"Loading base model + tokenizer via FastLanguageModel (Unsloth): {args.model_id}", flush=True)
+        base_model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=args.model_id,
+            dtype=torch.bfloat16,
+            load_in_4bit=False,
+            load_in_8bit=False,
+            full_finetuning=False,
+            trust_remote_code=True,
+            unsloth_force_compile=False,
+            attn_implementation="eager",
+        )
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        _unsloth_loaded = True
+        print("FastLanguageModel loaded — MoE/Mamba expert layers patched for LoRA", flush=True)
+    except Exception as _e:
+        print(f"Unsloth unavailable ({_e}), falling back to AutoModelForCausalLM", flush=True)
+        print(f"WARNING: v27 MoE/Mamba keys will be silently dropped — expect ~0.56 score", flush=True)
+        print(f"Loading tokenizer: {args.model_id}", flush=True)
+        tokenizer = AutoTokenizer.from_pretrained(args.model_id)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        print(f"Loading base model: {args.model_id}", flush=True)
+        base_model = AutoModelForCausalLM.from_pretrained(
+            args.model_id,
+            dtype=torch.bfloat16,
+            device_map={"": 0},
+            low_cpu_mem_usage=True,
+        )
+
     _stop_dropper.set()
     torch.cuda.empty_cache()
     free_gb = torch.cuda.mem_get_info()[0] / 1e9
-    print(f"Base model loaded. GPU free={free_gb:.1f}GB", flush=True)
+    print(f"Base model loaded (unsloth={_unsloth_loaded}). GPU free={free_gb:.1f}GB", flush=True)
 
     _patch_mamba_fastpath(base_model)
 
     # ── load v27 warmstart ──────────────────────────────────────────────────────
+    # With Unsloth: all 418 v27 keys load (MoE experts + Mamba layers visible).
+    # Without Unsloth: only 186 standard-path keys load; 232 dropped silently.
     print(f"Loading warmstart adapter: {args.warmstart_dir}", flush=True)
     model = PeftModel.from_pretrained(
         base_model,
@@ -317,40 +345,13 @@ def main():
     model.save_pretrained(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
 
-    # Merge v27 keys that standard PEFT cannot load back into the saved adapter.
-    #
-    # v27 was created with Unsloth which adds LoRA support for non-standard module
-    # paths that don't exist as nn.Linear in the transformers implementation:
-    #   - mixer.experts.w1/w2/w3  (MoE expert weights stored as batched 3-D tensors)
-    #   - mixer.gate_proj, mixer.x_proj  (Mamba-specific projections)
-    #   - mixer.shared_experts.up_proj/down_proj
-    #
-    # Standard PEFT silently drops these 232 keys when loading v27 (can't map them
-    # to nn.Module). We train only the 186 standard keys it CAN load. Without merging
-    # the dropped keys back, the submitted adapter is missing the bulk of v27's
-    # capability → Kaggle score regresses from 0.85 to ~0.56.
-    #
-    # Fix: start with all of v27's keys, overwrite the 186 keys we trained, add
-    # the 46 new keys (in_proj etc.). Result: full v27 coverage + our SFT updates.
+    # Key count report — confirms whether Unsloth loaded all v27 keys or not.
+    # With Unsloth: expect ~418+ keys (all MoE/Mamba keys trained and saved).
+    # Without Unsloth: expect ~232 keys (MoE/Mamba silently dropped) → ~0.56 score.
     st_path = Path(args.output_dir) / "adapter_model.safetensors"
-    warmstart_st = Path(args.warmstart_dir) / "adapter_model.safetensors"
-    if st_path.exists() and warmstart_st.exists():
-        from safetensors import safe_open
-        trained = load_file(str(st_path))
-        merged = {}
-        with safe_open(str(warmstart_st), framework="pt", device="cpu") as ws:
-            for k in ws.keys():
-                merged[k] = ws.get_tensor(k)
-        n_overwrite = sum(1 for k in trained if k in merged)
-        n_new = sum(1 for k in trained if k not in merged)
-        merged.update(trained)  # trained weights take priority
-        save_file(merged, str(st_path))
-        print(
-            f"Merged warmstart keys: {len(merged)} total"
-            f" ({n_overwrite} overwritten by training, {n_new} new, "
-            f"{len(merged)-len(trained)} restored from warmstart)",
-            flush=True,
-        )
+    if st_path.exists():
+        saved = load_file(str(st_path))
+        print(f"Saved adapter key count: {len(saved)} ({'full coverage' if len(saved) >= 400 else 'PARTIAL — MoE keys missing, expect ~0.56'})", flush=True)
 
     print(f"Saved adapter to {args.output_dir}", flush=True)
     for f in sorted(Path(args.output_dir).iterdir()):

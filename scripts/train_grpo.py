@@ -18,6 +18,7 @@ Usage (via run_grpo.sh):
 import argparse
 import csv
 import functools
+import importlib.machinery
 import math
 import re
 import sys
@@ -27,12 +28,13 @@ import warnings
 from datetime import datetime
 from pathlib import Path
 
-# Inject a stub llm_blender into sys.modules BEFORE importing TRL.
-# llm_blender internally imports TRANSFORMERS_CACHE which was removed in
-# transformers 5.5.3, causing GRPOTrainer to fail to import. File-patching
-# judges.py fails because the container runs as non-root. Injecting a stub
-# module is safe — we never call any llm_blender functions.
-import importlib.machinery
+# ── Import Unsloth FIRST so its optimizations apply before TRL/transformers ──
+# Then stub ONLY llm_blender (leaves vllm absent so Unsloth's metadata check
+# doesn't trigger and FastLanguageModel loads correctly).
+try:
+    from unsloth import FastLanguageModel as _FLM  # noqa: F401 — primes patches
+except Exception:
+    pass
 
 def _make_stub(name: str) -> types.ModuleType:
     m = types.ModuleType(name)
@@ -40,19 +42,15 @@ def _make_stub(name: str) -> types.ModuleType:
     m.__path__ = []
     return m
 
+# llm_blender: TRANSFORMERS_CACHE removed in transformers 5.5.3 — stub it out.
+# Do NOT stub vllm — leaving it absent lets is_vllm_available() return False,
+# which skips the `from vllm import LLM, SamplingParams` line cleanly.
 for _stub_name in (
     "llm_blender", "llm_blender.blender",
     "llm_blender.blender.blender", "llm_blender.blender.blender_utils",
-    "vllm", "vllm.lora", "vllm.lora.request",
 ):
     if _stub_name not in sys.modules:
         sys.modules[_stub_name] = _make_stub(_stub_name)
-
-# grpo_trainer.py does `from vllm import LLM, SamplingParams` when is_vllm_available().
-# Our stub makes it available, so add sentinel attrs — GRPOTrainer never uses them
-# when use_vllm=False.
-sys.modules["vllm"].LLM = None
-sys.modules["vllm"].SamplingParams = None
 
 warnings.filterwarnings("ignore", message=r".*save_embedding_layers.*")
 warnings.filterwarnings("ignore", message=r".*Could not find a config file.*")

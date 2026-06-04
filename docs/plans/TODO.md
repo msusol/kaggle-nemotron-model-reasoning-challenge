@@ -62,7 +62,7 @@ Key changes for v0.3:
   - See `docs/plans/kaggle-prize-eligibility-plan.md` for full plan
 
 ## ⚠️  COMPETITION DEADLINE
-- **June 8, 2026** — Entry deadline + Team merger deadline (accept rules by this date)
+- **June 8, 2026** — Entry deadline + Team merger deadline ✅ rules accepted
 - **June 15, 2026 at 11:59 PM UTC** — Final submission deadline
 - Today: June 3, 2026 — **12 days remaining**
 

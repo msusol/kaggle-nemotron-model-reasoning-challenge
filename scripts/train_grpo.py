@@ -19,12 +19,24 @@ import argparse
 import csv
 import functools
 import math
+import pathlib
 import re
 import sys
 import threading
 import warnings
 from datetime import datetime
 from pathlib import Path
+
+# Patch judges.py before TRL import — llm_blender imports TRANSFORMERS_CACHE which
+# was removed in transformers 5.5.3. pip uninstall leaves the directory, so
+# is_llm_blender_available() still returns True. Wrap the import in try/except.
+_judges = pathlib.Path("/usr/local/lib/python3.12/dist-packages/trl/trainer/judges.py")
+if _judges.exists():
+    _c = _judges.read_text()
+    _old = "\nimport llm_blender\n"
+    _new = "\ntry:\n    import llm_blender\nexcept Exception:\n    llm_blender = None\n"
+    if _old in _c and _new not in _c:
+        _judges.write_text(_c.replace(_old, _new, 1))
 
 warnings.filterwarnings("ignore", message=r".*save_embedding_layers.*")
 warnings.filterwarnings("ignore", message=r".*Could not find a config file.*")

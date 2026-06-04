@@ -30,6 +30,9 @@ from pathlib import Path
 warnings.filterwarnings("ignore", message=r".*save_embedding_layers.*")
 warnings.filterwarnings("ignore", message=r".*Could not find a config file.*")
 warnings.filterwarnings("ignore", message=r".*Unable to fetch remote file.*")
+warnings.filterwarnings("ignore", message=r".*use_return_dict.*deprecated.*")
+warnings.filterwarnings("ignore", message=r".*torchvision.*")
+warnings.filterwarnings("ignore", message=r".*unsloth_force_compile.*")
 
 
 def parse_args():

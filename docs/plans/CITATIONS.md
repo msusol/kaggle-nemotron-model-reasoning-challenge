@@ -48,6 +48,8 @@ This file maps the inline `[cite:N]` references used across the generated Markdo
 - `[cite:147]` Nemotron cache bug fix + Kaggle offline install – Kaggle competition discussion #692092 (Mark Cooper) — three-step fix: transformers>=5.3.0, remove trust_remote_code=True, gradient_checkpointing=False; offline wheel install pattern for Kaggle no-internet environment — <https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/692092>
 - `[cite:148]` QLoRA shape error + is_fast_path_available patch – Kaggle competition discussion #686431 — patching `is_fast_path_available=False` via sys.modules fixes QLoRA shape error but causes Half/Float dtype error; BF16 training should use `True`; QLoRA is broken for Nemotron-H in both directions — <https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/686431>
 
+- `[cite:149]` Loading nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 on DGX Spark — NVIDIA Developer Forums thread covering Docker flags, source builds, memory cleanup sequence, cache dropper thread, and Unsloth MoE LoRA — <https://forums.developer.nvidia.com/t/loading-nvidia-nvidia-nemotron-3-nano-30b-a3b-bf16-on-dgx-spark/372168>
+
 ## Usage note
 
 If the generated Markdown files are moved into a normal Git repository, this file can serve as the human-readable reference list for the inline citation tags used throughout the notes and README.[cite:1][cite:89]

@@ -1,14 +1,14 @@
 {
   "id": "gdataranger/nemotron-lora-submission-demo",
-  "title": "Nemotron Lora Submission Demo",
+  "title": "Nemotron-3-Nano-30B v0.5 SFT — Submission Demo",
   "code_file": "nemotron_submission_demo.ipynb",
   "language": "python",
   "kernel_type": "notebook",
   "is_private": true,
-  "enable_gpu": true,
+  "enable_gpu": false,
   "enable_tpu": false,
-  "enable_internet": true,
-  "dataset_sources": [],
+  "enable_internet": false,
+  "dataset_sources": ["gdataranger/nemotron-v05-sft-unsloth"],
   "competition_sources": ["nvidia-nemotron-model-reasoning-challenge"],
   "kernel_sources": ["ryanholbrook/nvidia-utility-script"]
 }

@@ -62,8 +62,11 @@ Key changes for v0.3:
   - See `docs/plans/kaggle-prize-eligibility-plan.md` for full plan
 
 ## ⚠️  COMPETITION DEADLINE
-**Deadline not yet recorded in docs.** Check Kaggle competition page and add here.
-All items above marked DEADLINE BLOCKER must complete before submission closes.
+- **June 8, 2026** — Entry deadline + Team merger deadline (accept rules by this date)
+- **June 15, 2026 at 11:59 PM UTC** — Final submission deadline
+- Today: June 3, 2026 — **12 days remaining**
+
+All items marked DEADLINE BLOCKER must complete before June 15.
 
 ## Inference fix — HybridMambaAttentionDynamicCache
 

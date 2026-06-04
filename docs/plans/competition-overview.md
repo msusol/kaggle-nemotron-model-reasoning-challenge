@@ -8,6 +8,15 @@ The Kaggle NVIDIA Nemotron Model Reasoning Challenge asks participants to improv
 
 Submissions are evaluated by loading the Nemotron base model together with the submitted LoRA adapter using vLLM.[cite:1] The evaluation prompt asks the model to put its final answer inside `\\boxed{}`, and the metric first tries to extract that boxed value before falling back to other heuristics.[cite:1][cite:54]
 
+## Timeline
+
+| Date | Event |
+|---|---|
+| March 16, 2026 | Start date |
+| April 9, 2026 | Midpoint cut-off date |
+| **June 8, 2026** | Entry deadline + Team merger deadline — must have accepted rules |
+| **June 15, 2026 23:59 UTC** | **Final submission deadline** |
+
 ## Hard constraints
 
 - LoRA rank must be 32 or less.[cite:1]

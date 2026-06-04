@@ -1,7 +1,7 @@
 {
   "id": "gdataranger/nemotron-3-nano-30b-lora-reasoning-challenge",
-  "title": "Nemotron 3 Nano 30B LoRA Reasoning Challenge",
-  "code_file": "kaggle_prize_eligibility_outline.ipynb",
+  "title": "Nemotron-3-Nano-30B v0.5 SFT — Unsloth Warmstart + Short-Response Fine-Tuning",
+  "code_file": "nemotron_v05_sft_unsloth.ipynb",
   "language": "python",
   "kernel_type": "notebook",
   "is_private": false,

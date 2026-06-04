@@ -118,7 +118,7 @@ See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full 
 │       ├── CITATIONS.md
 │       └── ...                          # submission-*, hybrid-mamba-*, archive/
 ├── notebook/
-│   ├── kaggle_prize_eligibility_outline.ipynb   # public prize eligibility writeup
+│   ├── nemotron_v05_sft_unsloth.ipynb   # public prize eligibility writeup
 │   ├── kernel-metadata.json                     # push config for prize notebook
 │   ├── nemotron_submission_demo.ipynb           # submission path 2: load adapter → /kaggle/working
 │   ├── submission-demo-kernel-metadata.json     # push config for submission demo

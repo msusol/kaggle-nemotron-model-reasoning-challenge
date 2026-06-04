@@ -9,7 +9,7 @@ Open Question #2.
 ## Context
 
 `scripts/infer_lora.py` and the `generate_answer` function in
-`notebook/kaggle_prize_eligibility_outline.ipynb` (cell 7) both call `model.generate()`
+`notebook/nemotron_v05_sft_unsloth.ipynb` (cell 7) both call `model.generate()`
 without passing `past_key_values`. For a hybrid Mamba-Attention model, this means the
 Mamba SSM state is not explicitly pre-allocated, which may prevent the fast path from
 activating.
@@ -24,7 +24,7 @@ Kaggle adapter:
 
 - [ ] Add `_get_mamba_cache_cls(model)` helper to `scripts/infer_lora.py`
 - [ ] Build fresh cache per batch in the generate loop in `scripts/infer_lora.py`
-- [ ] Update `generate_answer` in `notebook/kaggle_prize_eligibility_outline.ipynb` cell 7
+- [ ] Update `generate_answer` in `notebook/nemotron_v05_sft_unsloth.ipynb` cell 7
 - [ ] Mark v0.4 Open Question #2 resolved in `docs/plans/v0.4-blended-plan.md`
 
 ## Implementation
@@ -62,7 +62,7 @@ if cache_cls is not None:
 outputs = model.generate(**inputs, max_new_tokens=args.max_new_tokens, past_key_values=pkv, ...)
 ```
 
-### `generate_answer` update (`notebook/kaggle_prize_eligibility_outline.ipynb` cell 7)
+### `generate_answer` update (`notebook/nemotron_v05_sft_unsloth.ipynb` cell 7)
 
 Same `sys.modules` pattern, always `batch_size=1`.
 

@@ -76,7 +76,7 @@ Pre-allocate Mamba SSM state cache before `model.generate()` via `sys.modules` p
 Closes v0.4 Open Question #2 (Mamba fast path). Affects `infer_lora.py` and notebook cell 7.
 
 - [x] Add `_get_mamba_cache_cls` helper + per-batch cache init to `scripts/infer_lora.py`
-- [x] Update `generate_answer` in `notebook/kaggle_prize_eligibility_outline.ipynb` cell 7
+- [x] Update `generate_answer` in `notebook/nemotron_v05_sft_unsloth.ipynb` cell 7
 - [x] Mark v0.4 Open Question #2 resolved in `docs/plans/v0.4-blended-plan.md` — closed via `is_fast_path_available=True` patch [cite:148]
 
 ## MoE layer name audit ✓

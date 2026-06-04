@@ -139,7 +139,7 @@ ionice -c 2 -n 7 docker run --privileged \
   -w /workspace \
   nemotron-gb10:latest \
   python scripts/train_v5_sft.py \
-    --warmstart-dir /workspace/output/adapter_huikang_v27 \
+    --warmstart-dir /workspace/output/adapter_huikang_v27_unsloth \
     --train-file    /workspace/data/v0.5_train.jsonl \
     --output-dir    "${ADAPTER_OUT}" \
     --model-id      nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 \

@@ -48,8 +48,22 @@ Key changes for v0.3:
 - [x] Both notebooks run end-to-end (FULL_DEMO=False, trl wrapped, trl import guarded)
 - [x] `ryanholbrook/nvidia-utility-script` added as input manually via Kaggle UI
 - [x] Remove `trust_remote_code=True` from prize eligibility notebook cell 5 — prevents cached buggy `modeling_nemotron_h.py` overriding transformers 5.5.3 fix [cite:147]
-- [ ] Fill in Section 8 Results once v0.2-cot Kaggle score known
 - [ ] Confirm both notebooks show under competition Code tab
+- [ ] **DEADLINE BLOCKER** — Update prize eligibility notebook for v0.5 Unsloth approach:
+  - [ ] Update approach description: v0.5 SFT, kuangyicheng short-response, Unsloth joint training
+  - [ ] Update dataset section: `train.csv` (9,500) + synthetic (12,000), NOT kienngx CoT
+  - [ ] Update training config: `train_v5_sft.py`, `FastLanguageModel`, 240 steps, seq=6144
+  - [ ] Update adapter reference to `output/adapter_v5_sft_unsloth` once scored
+  - [ ] Fill Section 8 Results with final score table (all versions v0.1 → v0.5)
+  - [ ] Update Section 5 write-up with Unsloth/MoE key findings
+  - [ ] Remove/update stale v0.2-cot pre-computed outputs
+- [ ] Link `samvalladares/huikang-nemotron-artifacts` from prize eligibility notebook (Rule 6)
+- [ ] (Optional) Kaggle CPU training notebook — fork kuangyicheng, `max_steps=3` timing test first
+  - See `docs/plans/kaggle-prize-eligibility-plan.md` for full plan
+
+## ⚠️  COMPETITION DEADLINE
+**Deadline not yet recorded in docs.** Check Kaggle competition page and add here.
+All items above marked DEADLINE BLOCKER must complete before submission closes.
 
 ## Inference fix — HybridMambaAttentionDynamicCache
 

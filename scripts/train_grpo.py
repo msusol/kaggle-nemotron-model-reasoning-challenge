@@ -222,10 +222,10 @@ def main():
         lr_scheduler_type="cosine",
         warmup_steps=20,
         num_generations=args.num_generations,
-        max_new_tokens=args.max_new_tokens,
+        max_completion_length=args.max_new_tokens,  # TRL 0.15.2 name
+        max_prompt_length=1024,                     # competition prompts can be long
         temperature=0.7,
-        top_p=0.95,
-        kl_coeff=args.kl_coeff,
+        beta=args.kl_coeff,                         # TRL 0.15.2 name for kl_coeff
         bf16=True,
         gradient_checkpointing=False,
         logging_steps=5,

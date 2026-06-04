@@ -237,6 +237,12 @@ def main():
         report_to="none",
     )
 
+    # GRPOTrainer sets model.warnings_issued["estimate_tokens"] = True at init.
+    # NemotronHForCausalLM doesn't have this attribute (standard in GenerationMixin
+    # but absent here). Add it on the PeftModel instance so the assignment lands.
+    if not hasattr(model, "warnings_issued"):
+        model.warnings_issued = {}
+
     trainer = GRPOTrainer(
         model=model,
         processing_class=tokenizer,

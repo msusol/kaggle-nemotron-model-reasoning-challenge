@@ -657,3 +657,50 @@ help with the token-limit problem — long-CoT is fundamentally incompatible wit
 Kaggle's runner regardless of how the data was generated. The 0.87 result is
 achieved precisely by abandoning long-CoT and using short responses that always
 complete within the token budget.
+
+---
+
+## 10. Score clarification — 0.88 notebook, 0.62 on Kaggle, 0.87/0.88 on Modal.com
+
+**Confirmed via `kaggle kernels pull kuangyicheng/nemotron-087-training` (2026-06-03):**
+
+The notebook's internal title is **"Nemotron 0.88 Final"** (the URL slug `nemotron-087-training`
+is an older name). The Kaggle page shows a **best score of 0.62**, not 0.87 or 0.88.
+
+The 0.87/0.88 score was achieved by running the training on **Modal.com RTX PRO 6000**
+and submitting that adapter directly. The Kaggle notebook is a reference/documentation
+artifact; running it on Kaggle's compute (with its GPU limitations and the `PeftModel`
+loading gaps described in `v0.5-unsloth-peft-key-mismatch.md`) only reaches 0.62.
+
+### What the notebook actually does
+
+```python
+# Step 1: Unsloth patches the base model (exposes MoE experts as trainable LoRA targets)
+model, tokenizer = FastLanguageModel.from_pretrained(model_name=MODEL_PATH, ...)
+
+# Step 2: Load v27 on top of Unsloth-patched model (all 418 keys load)
+model = PeftModel.from_pretrained(model, WARMSTART_DIR, is_trainable=True)
+
+# Step 3: Train 240 steps (all layers updated jointly — attention + MoE + Mamba)
+
+# Step 4: Save with standard PEFT save_pretrained → .default. format throughout
+model.save_pretrained(ADAPTER_DIR)
+```
+
+The 0.87/0.88 requires `FastLanguageModel` (Unsloth) to patch the base model so that
+all layers train jointly. Without Unsloth, v27's MoE/Mamba keys are silently dropped
+on load, only ~90 attention layers train, and the resulting adapter scores 0.56–0.62.
+
+### "NO lm_head LoRA" note
+
+The notebook explicitly states `"NO lm_head LoRA (drops score with SFTTrainer per dgxchen)"`.
+lm_head LoRA hurts performance with SFTTrainer on this model. Our lm_head rename was
+a no-op anyway (v27 does not include lm_head LoRA) and is not needed.
+
+### Revised score attribution
+
+| Run | Score | Method |
+|---|---|---|
+| kuangyicheng (Modal.com, Unsloth, full training) | **0.87/0.88** | All layers trained jointly |
+| kuangyicheng Kaggle notebook run | 0.62 | Same gap as our setup — PeftModel drops MoE keys |
+| Our v0.5-sft (standard PEFT) | 0.56 | Same root cause + additional training bugs fixed late |

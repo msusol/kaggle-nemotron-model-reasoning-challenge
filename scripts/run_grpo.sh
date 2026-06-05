@@ -117,7 +117,7 @@ ionice -c 2 -n 7 docker run --privileged \
     --num-steps       500 \
     --num-generations 4 \
     --learning-rate   1e-6 \
-    --max-new-tokens  256 \
+    --max-new-tokens  512 \
     --kl-coeff        0.04 \
     --batch-size      1 \
     --seed            3407 \

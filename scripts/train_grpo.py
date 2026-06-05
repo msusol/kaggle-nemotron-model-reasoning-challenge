@@ -18,6 +18,7 @@ Usage (via run_grpo.sh):
 import argparse
 import csv
 import functools
+import json
 import importlib.machinery
 import math
 import re
@@ -129,21 +130,31 @@ def main():
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     print(f"Output: {args.output_dir}", flush=True)
 
-    # ── load model + SFT adapter via Unsloth ────────────────────────────────
-    # MUST use FastLanguageModel.from_pretrained(adapter_dir) — NOT base model
-    # + PeftModel.from_pretrained.  The v5_sft_unsloth adapter was saved by
-    # Unsloth with keys like `backbone.layers.X.mixer.in_proj.lora_A.weight`
-    # (no `.default.` adapter name, `backbone` not `model` in path).  Standard
-    # PeftModel.from_pretrained expects `model.layers.X.*.lora_A.default.weight`
-    # and silently reports ALL 12,008 keys missing → model trains from base
-    # weights, generates 1024-token CoT responses → OOM.
+    # ── load base model + rebuild Unsloth LoRA structure + load SFT weights ──
+    # Why not PeftModel.from_pretrained or FastLanguageModel.from_pretrained(adapter_dir)?
+    #
+    # Unsloth saves keys as `backbone.layers.X.*.lora_A.weight` (no `.default.`).
+    # Standard PEFT / FastLanguageModel.from_pretrained both fail to load them:
+    #   - PeftModel.from_pretrained: expects `model.layers.X.*.lora_A.default.weight` → 0 keys loaded
+    #   - FastLanguageModel.from_pretrained(adapter_dir): only creates 232 standard modules,
+    #     ignores all 12,008 MoE expert keys → model trains from base weights → OOM
+    #
+    # Correct approach:
+    #   1. Load base model with FastLanguageModel (patches MoE experts as individual nn.Linear)
+    #   2. FastLanguageModel.get_peft_model with SAME config as SFT → creates 12,008 modules
+    #      under `backbone.layers` path (matches saved keys)
+    #   3. Manually load saved weights via set_peft_model_state_dict
+    #      (PEFT auto-handles lora_A.weight → lora_A.default.weight remapping)
     _stop = _make_cache_dropper()
-    model = None
     try:
         from unsloth import FastLanguageModel
-        print(f"Loading SFT adapter via FastLanguageModel: {args.adapter_dir}", flush=True)
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=args.adapter_dir,  # Unsloth reads adapter_config.json → loads base + adapter
+        from peft import set_peft_model_state_dict
+        from safetensors.torch import load_file as st_load
+
+        # Step 1: load base model
+        print(f"Loading base model via FastLanguageModel: {args.model_id}", flush=True)
+        base_model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=args.model_id,
             dtype=torch.bfloat16,
             load_in_4bit=False,
             full_finetuning=False,
@@ -153,20 +164,45 @@ def main():
         )
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
-        print("FastLanguageModel loaded with SFT adapter — MoE layers patched", flush=True)
-    except Exception as e:
-        print(f"Unsloth load failed ({e}), falling back to base + PeftModel", flush=True)
+        print("Base model loaded — MoE layers patched", flush=True)
 
-    if model is None:
+        # Step 2: rebuild same LoRA structure as SFT training
+        adapter_cfg = json.loads((Path(args.adapter_dir) / "adapter_config.json").read_text())
+        model = FastLanguageModel.get_peft_model(
+            base_model,
+            r=adapter_cfg.get("r", 32),
+            lora_alpha=adapter_cfg.get("lora_alpha", 32),
+            target_modules=adapter_cfg.get("target_modules",
+                ["q_proj","k_proj","v_proj","o_proj","in_proj","out_proj","up_proj","down_proj"]),
+            lora_dropout=adapter_cfg.get("lora_dropout", 0),
+            bias=adapter_cfg.get("bias", "none"),
+            use_gradient_checkpointing=False,
+            random_state=args.seed,
+        )
+        n_lora_modules = sum(1 for n, _ in model.named_parameters() if ".lora_" in n)
+        print(f"LoRA structure created: {n_lora_modules} params", flush=True)
+
+        # Step 3: load SFT weights — PEFT handles lora_A.weight → lora_A.default.weight
+        st_path = Path(args.adapter_dir) / "adapter_model.safetensors"
+        saved_state = st_load(str(st_path))
+        load_result = set_peft_model_state_dict(model, saved_state)
+        n_missing = len(load_result.missing_keys) if load_result.missing_keys else 0
+        n_unexpected = len(load_result.unexpected_keys) if load_result.unexpected_keys else 0
+        print(f"SFT weights loaded: {len(saved_state)} keys, missing={n_missing}, unexpected={n_unexpected}", flush=True)
+        if n_missing:
+            print(f"  First missing: {load_result.missing_keys[:3]}", flush=True)
+
+    except Exception as e:
+        print(f"Unsloth load failed ({e}), falling back to AutoModelForCausalLM + PeftModel", flush=True)
         from transformers import AutoModelForCausalLM, AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(args.model_id)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
-        base_model = AutoModelForCausalLM.from_pretrained(
+        _base = AutoModelForCausalLM.from_pretrained(
             args.model_id, dtype=torch.bfloat16,
             device_map={"": 0}, low_cpu_mem_usage=True,
         )
-        model = PeftModel.from_pretrained(base_model, args.adapter_dir, is_trainable=True)
+        model = PeftModel.from_pretrained(_base, args.adapter_dir, is_trainable=True)
 
     _stop.set()
     torch.cuda.empty_cache()
@@ -179,18 +215,17 @@ def main():
             print("Mamba fast path enabled", flush=True)
             break
 
-    # Make LoRA params trainable in fp32 (Unsloth loads adapter in inference_mode=True)
+    # Cast LoRA params to fp32 for stable training
     lora_count = 0
     for name, param in model.named_parameters():
         if ".lora_" in name:
             param.requires_grad_(True)
             param.data = param.data.to(torch.float32)
             lora_count += 1
-    print(f"LoRA params made trainable: {lora_count}", flush=True)
+    print(f"LoRA params trainable (fp32): {lora_count}", flush=True)
 
     _gc_func = functools.partial(torch.utils.checkpoint.checkpoint, use_reentrant=False)
     try:
-        # Try PeftModel path first, fall back to base model direct call
         _gc_target = getattr(model, "base_model", model)
         _gc_target = getattr(_gc_target, "model", _gc_target)
         _gc_target._set_gradient_checkpointing(

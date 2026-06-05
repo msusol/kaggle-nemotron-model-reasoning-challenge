@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Modal.com training — kuangyicheng 0.87/0.88 SFT approach on A100-80GB.
+"""Modal.com training — kuangyicheng 0.87/0.88 SFT approach on RTX Pro 6000 (96GB).
 
 Replicates the short-response SFT that produces 0.87/0.88:
   1. Unsloth FastLanguageModel patches Nemotron-H MoE experts as individual nn.Linear
   2. v27 adapter loaded as warmstart (11,962 keys in backbone.layers format)
   3. 240-step SFT on competition data with short responses (~100 tokens)
+
+GPU: RTX Pro 6000 Blackwell (96GB, sm_120, $3.03/hr). ~2h run ≈ $6.
+CUDA 12.8 image required for sm_120 (Blackwell) kernel compilation.
 
 Prerequisites (local machine):
   pip install modal
@@ -26,18 +29,18 @@ import modal
 from pathlib import Path
 
 # ── Image ──────────────────────────────────────────────────────────────────────
-# A100-80GB uses sm_80 (Ampere); mamba-ssm + causal-conv1d have pre-built wheels
-# for CUDA 12.1 so no source build needed (unlike GB10 which needs CUDA 13.2+).
+# RTX Pro 6000 Blackwell is sm_120; CUDA 12.8+ required to compile mamba-ssm for it.
+# PyTorch 2.6 has cu128 wheels. mamba-ssm will build from source for sm_120.
 image = (
     modal.Image.from_registry(
-        "nvidia/cuda:12.1.0-devel-ubuntu22.04",
+        "nvidia/cuda:12.8.1-devel-ubuntu22.04",
         add_python="3.11",
     )
-    .apt_install("git", "git-lfs")
+    .apt_install("git", "git-lfs", "ninja-build")
     .pip_install(
-        "torch==2.3.1",
-        "torchvision",
-        extra_index_url="https://download.pytorch.org/whl/cu121",
+        "torch==2.6.0",
+        "torchvision==0.21.0",
+        extra_index_url="https://download.pytorch.org/whl/cu128",
     )
     .pip_install(
         "transformers==5.5.3",
@@ -91,8 +94,8 @@ _WARMSTART  = _PROJECT / "output" / "adapter_huikang_v27_unsloth"  # 1.7 GB, 119
 
 
 @app.function(
-    gpu="A100-80GB",
-    timeout=4 * 3600,   # 4-hour cap; 240-step run takes ~2 h on A100
+    gpu="RTX_PRO_6000",
+    timeout=4 * 3600,   # 4-hour cap; 240-step run takes ~2 h on RTX Pro 6000
     volumes={
         "/root/.cache/huggingface": hf_cache_vol,
         "/output": output_vol,
@@ -363,7 +366,7 @@ def main(
     print(f"Launching Modal SFT: {num_steps} steps → /output/{output_name}")
     print(f"  Warmstart:  output/adapter_huikang_v27_unsloth  ({_WARMSTART})")
     print(f"  Train data: data/v0.5_train.jsonl  ({_TRAIN_DATA})")
-    print(f"  GPU:        A100-80GB  (~$2.50/hr, ~2h = ~$5)")
+    print(f"  GPU:        RTX Pro 6000 Blackwell 96GB  (~$3.03/hr, ~2h = ~$6)")
     train_sft.remote(num_steps=num_steps, output_name=output_name)
     print(f"\nDone. Download the adapter:")
     print(f"  mkdir -p output/{output_name}")

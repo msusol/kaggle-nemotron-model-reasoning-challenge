@@ -200,7 +200,7 @@ if [[ "${VLLM_ALREADY_UP}" != "1" ]]; then
   docker run --detach \
     --name "nemotron-grpo-${RUN_NAME}" \
     --privileged \
-    --oom-score-adj 500 \
+    --oom-score-adj -300 \
     -e NVIDIA_VISIBLE_DEVICES=all \
     --network=host \
     --ipc=host \
@@ -288,7 +288,7 @@ docker run --detach \
   --name "nemotron-vllm-sidecar" \
   --privileged \
   -e NVIDIA_VISIBLE_DEVICES=all \
-  --oom-score-adj -300 \
+  --oom-score-adj 300 \
   --network=host \
   --ipc=host \
   --ulimit memlock=-1 \

@@ -63,13 +63,16 @@ case "${SIDECAR_MODEL}" in
   NVFP4)
     VLLM_MODEL_ID="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4"
     VLLM_GPU_MEM_UTIL="0.25"
-    NVFP4_ENV=(-e VLLM_USE_FLASHINFER_MOE_FP4=1 -e VLLM_FLASHINFER_MOE_BACKEND=throughput)
+    NVFP4_ENV=()
+    # FLASHINFER_CUTLASS doesn't support LoRA; cutedsl (nvidia-cutlass-dsl) does
+    NVFP4_VLLM_ARGS=(--moe-backend flashinfer_cutedsl)
     ;;
   FP8|*)
     VLLM_MODEL_ID="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8"
     # Trainer steady-state ≈ 71 GB → ~50 GB free. 0.35×121.69=42.6 GB (model 32 GB + 10.6 GB KV cache).
     VLLM_GPU_MEM_UTIL="0.35"
     NVFP4_ENV=()
+    NVFP4_VLLM_ARGS=()
     ;;
 esac
 
@@ -303,7 +306,8 @@ docker run --detach \
     --max-num-seqs 8 \
     --port "${SIDECAR_PORT}" \
     --host 0.0.0.0 \
-    --download-dir /workspace/.cache/huggingface
+    --download-dir /workspace/.cache/huggingface \
+    "${NVFP4_VLLM_ARGS[@]}"
 
 # Aggressive page-cache dropper while vLLM loads (background, stops when health OK)
 echo "Starting 3s page-cache dropper during vLLM load..."

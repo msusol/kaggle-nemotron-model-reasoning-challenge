@@ -118,8 +118,8 @@ if [[ "${VLLM_ALREADY_UP}" != "1" ]]; then
     exit 1
   fi
   docker rm -f "nemotron-vllm-sidecar" 2>/dev/null || true
+  docker rm -f "nemotron-grpo-${RUN_NAME}" 2>/dev/null || true
 fi
-docker rm -f "nemotron-grpo-${RUN_NAME}" 2>/dev/null || true
 
 echo "Dropping page cache (pass 1)..."
 sync

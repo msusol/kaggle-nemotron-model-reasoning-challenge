@@ -216,19 +216,33 @@ def main():
     total = sum(p.numel() for p in model.parameters())
     print(f"Trainable: {trainable:,} / Total: {total:,}", flush=True)
 
-    # ── override max_position_embeddings ────────────────────────────────────────
-    # Unsloth reads model.config.max_position_embeddings and silently caps
-    # max_seq_length to that value. Nemotron-H (Mamba architecture) has this set
-    # to 2048 by default even though the architecture supports arbitrary length.
-    # Override before dataset tokenization to allow full 8192-token traces.
+    # ── override sequence-length caps before Unsloth tokenizes ──────────────────
+    # Unsloth caps max_seq_length to the smallest of: tokenizer.model_max_length,
+    # model.config.max_position_embeddings, and several other aliases. For Nemotron-H
+    # (Mamba architecture) these are all set to 2048 by default. Override ALL of them
+    # before the dataset is tokenized so full 8192-token traces are preserved.
     try:
         _base_cfg = model.base_model.model.config
     except AttributeError:
         _base_cfg = model.config
-    _reported = getattr(_base_cfg, "max_position_embeddings", None)
-    if _reported is not None and _reported < args.max_seq_length:
-        _base_cfg.max_position_embeddings = args.max_seq_length
-        print(f"Overrode max_position_embeddings: {_reported} → {args.max_seq_length}", flush=True)
+
+    # Model config — check every alias Unsloth might read
+    _cfg_attrs = ("max_position_embeddings", "max_seq_length", "max_seqlen",
+                  "seq_length", "max_sequence_length")
+    for _attr in _cfg_attrs:
+        _val = getattr(_base_cfg, _attr, None)
+        if _val is not None:
+            print(f"  model.config.{_attr} = {_val}", flush=True)
+            if _val < args.max_seq_length:
+                setattr(_base_cfg, _attr, args.max_seq_length)
+                print(f"  → overrode to {args.max_seq_length}", flush=True)
+
+    # Tokenizer model_max_length — the primary value Unsloth reads
+    _tok_max = getattr(tokenizer, "model_max_length", None)
+    print(f"  tokenizer.model_max_length = {_tok_max}", flush=True)
+    if _tok_max is not None and _tok_max < args.max_seq_length:
+        tokenizer.model_max_length = args.max_seq_length
+        print(f"  → overrode tokenizer.model_max_length to {args.max_seq_length}", flush=True)
 
     # ── load dataset ────────────────────────────────────────────────────────────
     print(f"Loading dataset: {args.train_file}", flush=True)

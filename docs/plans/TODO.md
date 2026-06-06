@@ -225,6 +225,10 @@ Flag files `.trainer_model_ready` / `.vllm_sidecar_ready` coordinate the sequenc
 - [x] Rebuild `nemotron-vllm-gb10:latest` — vLLM 0.22.1, flashinfer 0.6.11.post2, peft, cutlass-dsl (2026-06-06)
 - [x] Create GRPO warmstart adapter — ran `remap_sft_adapter_for_grpo.py` → `output/adapter_v5_sft_grpo_warmstart/` (232 keys, 55.5 MB)
 - [x] FP8 model cached — `.cache/huggingface/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-FP8/` (38 files, 31 GB, 2026-06-06)
+- [x] Fix vLLM OOM during startup — `VLLM_ENFORCE_EAGER=1` (default) skips ninja CUDA graph compilation that spiked GB10 unified memory; `VLLM_TORCH_COMPILE_WORKERS=1` as backstop; compile cache mounted at `.cache/vllm_compile`
+- [x] Fix vLLM timeouts — `_VLLM_TIMEOUT` 900→2700 s (orchestration), `_vllm_wait_timeout` 1200→2700 s (trainer); FP8 cold-start takes 23+ min compiled / ~10 min eager
+- [x] Reduce FP8 `VLLM_GPU_MEM_UTIL` 0.35→0.30 — leaves headroom for future compiled mode
+- [x] Configurable adapter/data paths — `SFT_ADAPTER`, `GRPO_WARMSTART`, `TRAIN_FILE` env vars in `run_grpo_sidecar.sh`; defaults to v5/v0.9; override for v9 without editing script
 - [ ] Cache NVFP4 model — `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4` (~25 GB, needed for default NVFP4 path)
 
 ### Smoke test (run before full training)
@@ -247,7 +251,15 @@ Flag files `.trainer_model_ready` / `.vllm_sidecar_ready` coordinate the sequenc
 - [ ] Resolve open questions from plan (disable_adapter, LoRA hot-swap API, FP8+LoRA dtype)
 
 ### Full training run
-- [ ] Run full GRPO in tmux: `RUN_NAME=grpo_v10 bash scripts/run_grpo_sidecar.sh`
+- [ ] Run v9 SFT: `RUN_NAME=v9_sft bash scripts/run_train_v9.sh` → `output/adapter_v9_sft`
+- [ ] Remap v9 adapter: `remap_sft_adapter_for_grpo.py` → `output/adapter_v9_sft_grpo_warmstart`
+- [ ] Run full GRPO with v9 adapters:
+  ```bash
+  SFT_ADAPTER=/workspace/output/adapter_v9_sft \
+  GRPO_WARMSTART=/workspace/output/adapter_v9_sft_grpo_warmstart \
+  TRAIN_FILE=/workspace/data/v0.9_train.jsonl \
+  RUN_NAME=grpo_v10 bash scripts/run_grpo_sidecar.sh
+  ```
 - [ ] Validate, package, submit; update leaderboard
 
 ## Next steps

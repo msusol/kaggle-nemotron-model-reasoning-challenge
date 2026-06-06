@@ -49,6 +49,11 @@ NUM_STEPS="${NUM_STEPS:-500}"
 NUM_GENERATIONS="${NUM_GENERATIONS:-4}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-512}"
 VLLM_ALREADY_UP="${VLLM_ALREADY_UP:-0}"  # set to 1 to reuse a running vLLM on trainer retry
+# Adapter / data paths — override these env vars to switch from v5→v9 (or any future version)
+# without editing the script.
+SFT_ADAPTER="${SFT_ADAPTER:-/workspace/output/adapter_v5_sft_unsloth}"
+GRPO_WARMSTART="${GRPO_WARMSTART:-/workspace/output/adapter_v5_sft_grpo_warmstart}"
+TRAIN_FILE="${TRAIN_FILE:-/workspace/data/v0.9_train.jsonl}"
 # --enforce-eager disables CUDA graph capture + torch.compile warmup; prevents OOM during kernel
 # compilation on GB10's unified memory (ninja spawns N parallel CUDA compile jobs that spike RAM).
 # Set to 0 once the compile cache is warm (cache is persisted via .cache/vllm_compile mount).
@@ -187,7 +192,7 @@ fi
 # Unsloth creates only 232 fused-MoE keys in GRPO mode (model.layers, .default.).
 # The remap drops the 11,776 per-expert keys and renames the 232 remainder so they
 # exactly match the GRPO model's parameter names for warmstart injection.
-GRPO_WARMSTART_HOST="${WORKSPACE}/output/adapter_v5_sft_grpo_warmstart"
+GRPO_WARMSTART_HOST="${WORKSPACE}/${GRPO_WARMSTART#/workspace/}"
 if [[ ! -f "${GRPO_WARMSTART_HOST}/adapter_model.safetensors" ]]; then
   echo "Remapping SFT adapter to GRPO format..."
   docker run --rm \
@@ -197,8 +202,8 @@ if [[ ! -f "${GRPO_WARMSTART_HOST}/adapter_model.safetensors" ]]; then
     -w /workspace \
     nemotron-gb10:latest \
     python scripts/remap_sft_adapter_for_grpo.py \
-      --src /workspace/output/adapter_v5_sft_unsloth \
-      --dst /workspace/output/adapter_v5_sft_grpo_warmstart
+      --src "${SFT_ADAPTER}" \
+      --dst "${GRPO_WARMSTART}"
 else
   echo "GRPO warmstart adapter already exists: ${GRPO_WARMSTART_HOST}"
 fi
@@ -227,9 +232,9 @@ if [[ "${VLLM_ALREADY_UP}" != "1" ]]; then
     -w /workspace \
     nemotron-gb10:latest \
     python scripts/train_grpo_sidecar.py \
-      --adapter-dir        /workspace/output/adapter_v5_sft_unsloth \
-      --grpo-warmstart     /workspace/output/adapter_v5_sft_grpo_warmstart \
-      --train-file         /workspace/data/v0.9_train.jsonl \
+      --adapter-dir        "${SFT_ADAPTER}" \
+      --grpo-warmstart     "${GRPO_WARMSTART}" \
+      --train-file         "${TRAIN_FILE}" \
       --output-dir         "${ADAPTER_OUT}" \
       --vllm-server-url    "http://localhost:${SIDECAR_PORT}" \
       --rollout-sync-steps "${ROLLOUT_SYNC_STEPS}" \
@@ -362,7 +367,7 @@ kill "${_dropper_pid}" 2>/dev/null || true
 echo "vLLM sidecar healthy (${_ELAPSED}s)"
 
 # ── STEP 6: Load initial LoRA adapter ────────────────────────────────────────
-INITIAL_ADAPTER="/workspace/output/adapter_v5_sft_unsloth"
+INITIAL_ADAPTER="${SFT_ADAPTER}"
 echo "Loading initial LoRA adapter: ${INITIAL_ADAPTER}..."
 _LORA_RESP=$(curl -s -w "\n%{http_code}" \
   -X POST "http://localhost:${SIDECAR_PORT}/v1/load_lora_adapter" \

@@ -204,19 +204,70 @@ See `docs/plans/v0.5-nemo-framework-plan.md`.
 - [ ] Delete old dataset: `kaggle datasets delete gdataranger/huikang-nemotron-nemo-sft-r32 -y`
 - [ ] Create new dataset: `gdataranger/nemotron-v5-competition-nemo-sft`
 
-## Phase 6 — v0.6 GRPO (self-improvement)
+## Phase 6 — v0.9 SFT (base-model init, all 14 categories)
 
-See `docs/plans/v0.6-grpo-plan.md` for algorithm background and memory budgets.
-Init from v0.5 adapter once it scores.
+See `docs/plans/v0.9-plan.md`.
+Base model init (no warmstart), format 4, all 14 competition categories, 1000 steps.
 
-- [ ] Add `mergekit` to `Dockerfile.gb10`; rebuild `nemotron-gb10:latest`
-- [ ] Confirm `from trl import GRPOTrainer` works in rebuilt image
-- [ ] Write `scripts/train_grpo.py` — init from v0.5 adapter
-- [ ] Write `configs/nemotron_grpo.yaml` — LR=1e-6, N=8, max_new_tokens=6144, kl_coeff=0.04
-- [ ] Write `scripts/run_grpo.sh`
-- [ ] Test run: 50 steps on 100 problems — verify reward signal > 0
-- [ ] Full run: `RUN_NAME=grpo_v6 bash scripts/run_grpo.sh`
-- [ ] Validate, package, submit; record in leaderboard
+- [ ] Confirm `scripts/train_v9_sft.py` + `scripts/run_train_v9.sh` are ready
+- [ ] Run training in tmux: `RUN_NAME=v9_sft bash scripts/run_train_v9.sh`
+- [ ] Validate, package, submit; update leaderboard
+
+## Phase 7 — v0.10 GRPO + vLLM Sidecar
+
+See `docs/plans/v0.10-grpo-sidecar-plan.md` for architecture, memory budget, and startup sequence.
+Init from v0.5-sft-unsloth (0.60 Kaggle). Two-container approach validated by mineral-hr-llm.
+
+**Startup order is critical** — trainer must load first (peaks ~126 GB), then vLLM FP8 (~37 GB).
+Flag files `.trainer_model_ready` / `.vllm_sidecar_ready` coordinate the sequence.
+
+### Infrastructure
+- [ ] Rebuild `nemotron-vllm-gb10:latest` — adds `peft`, optional NVFP4 flashinfer deps
+  ```bash
+  docker build \
+    --platform linux/arm64 \
+    -t nemotron-vllm-gb10:latest \
+    -f Dockerfile.vllm-gb10 \
+    .
+  ```
+- [ ] Confirm FP8 model is cached at `.cache/huggingface/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-FP8/`
+  (if not: `python -c "from huggingface_hub import snapshot_download; snapshot_download('nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8')"`)
+
+### Smoke test (run before full training)
+- [ ] Run 10-step smoke test in tmux:
+  ```bash
+  tmux new -s grpo_smoke
+  RUN_NAME=grpo_v10_smoke \
+  ROLLOUT_SYNC_STEPS=5 \
+    bash scripts/run_grpo_sidecar.sh \
+      --num-steps 10 \
+      --num-generations 4 \
+      --max-new-tokens 128
+  ```
+- [ ] Verify startup sequence: trainer loads first, `.trainer_model_ready` written, then vLLM starts
+- [ ] Verify vLLM health 200 and initial LoRA load HTTP 200
+- [ ] Verify non-zero reward signal at step 5
+- [ ] Verify LoRA sync at step 5 logs `vLLM LoRA sync → HTTP 200`
+- [ ] Verify combined memory < 130 GB during smoke test
+- [ ] Resolve open questions from plan (disable_adapter, LoRA hot-swap API, FP8+LoRA dtype)
+
+### Full training run
+- [ ] Run full GRPO in tmux: `RUN_NAME=grpo_v10 bash scripts/run_grpo_sidecar.sh`
+- [ ] Validate, package, submit; update leaderboard
+
+## Next steps
+
+### v0.9-plan.md
+1. Run `train_v9_sft.py` — 1000 steps, base init, all 14 cats, format 4
+2. Validate and submit; record Kaggle score in leaderboard
+
+### v0.10-grpo-sidecar-plan.md
+1. Rebuild `nemotron-vllm-gb10:latest` with peft + NVFP4 deps
+2. Confirm FP8 model cached locally
+3. Smoke test (10 steps, N=4, max_tokens=128) — verify load order + LoRA sync
+4. Resolve open questions: `disable_adapter` on Unsloth PeftModel, vLLM LoRA hot-swap API, FP8+LoRA dtype
+5. Full run: `RUN_NAME=grpo_v10 bash scripts/run_grpo_sidecar.sh` in tmux
+6. Validate and submit
 
 ## Infrastructure (complete)
 - [x] `Dockerfile.gb10` (26.04) — current primary image for all training runs

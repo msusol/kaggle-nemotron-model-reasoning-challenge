@@ -26,3 +26,10 @@ warmup_ratio: 0.05
 # Memory / hardware
 use_4bit: false             # blocked: broken for NemotronH MoE experts
 gradient_checkpointing: false  # NemotronH raises ValueError on HF GC enable
+
+# vLLM sidecar (used by run_grpo_sidecar.sh)
+# FP8 sidecar: ~37 GB; training BF16: ~83 GB; total ~120 GB — fits 130.7 GB GB10
+vllm_sidecar_model: FP8          # FP8 (default, simpler) or NVFP4 (20 GB headroom, extra deps)
+vllm_sidecar_port: 8000
+vllm_gpu_mem_util: 0.30          # FP8=0.30, NVFP4=0.20
+rollout_sync_steps: 50           # sync LoRA from trainer → vLLM every N steps

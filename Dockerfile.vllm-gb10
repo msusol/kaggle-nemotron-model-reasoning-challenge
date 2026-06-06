@@ -49,7 +49,16 @@ RUN pip install \
     "openai>=1.0.0" \
     "kagglehub" \
     "tqdm" \
-    "safetensors"
+    "safetensors" \
+    "peft" \
+    "requests"
+
+# NVFP4 support on Blackwell (flashinfer 0.5.3 + cutlass-dsl for FP4 MoE kernels).
+# Soft-fail: FP8 sidecar path works without these; only SIDECAR_MODEL=NVFP4 needs them.
+RUN pip install \
+    "flashinfer-python==0.5.3" \
+    "nvidia-cutlass-dsl" \
+ || echo "NVFP4 deps unavailable — FP8 sidecar will work without them"
 
 RUN mkdir -p \
     /workspace/data \

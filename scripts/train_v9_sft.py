@@ -114,12 +114,14 @@ def main():
                 return
         print("Mamba fast path: module not found yet", flush=True)
 
-    # ── load base model + init LoRA ─────────────────────────────────────────────
-    # FastLanguageModel patches MoE expert tensors and Mamba projections as trainable
-    # LoRA targets. Without it, ~232 of the 418 per-expert keys are invisible to PEFT
-    # and silently skipped. Falls back to AutoModelForCausalLM + standard PEFT.
+    # ── Step 1: load base model weights (one attempt — never reload) ───────────────
+    # FastLanguageModel patches MoE expert tensors and Mamba projections so they are
+    # visible to PEFT as trainable LoRA targets. If it fails, fall back to
+    # AutoModelForCausalLM. Either way, weights are loaded exactly once.
     _unsloth_loaded = False
+    _lora_via_unsloth = False
     _stop_dropper = _make_cache_dropper(interval=20.0)
+
     try:
         from unsloth import FastLanguageModel
         print(f"Loading base model via FastLanguageModel (Unsloth): {args.model_id}", flush=True)
@@ -138,45 +140,47 @@ def main():
         _unsloth_loaded = True
         print("FastLanguageModel loaded — MoE/Mamba expert layers patched for LoRA", flush=True)
 
-        _stop_dropper.set()
-        torch.cuda.empty_cache()
-        free_gb = torch.cuda.mem_get_info()[0] / 1e9
-        print(f"Base model loaded. GPU free={free_gb:.1f}GB", flush=True)
-
-        model = FastLanguageModel.get_peft_model(
-            model,
-            r=args.lora_r,
-            lora_alpha=args.lora_alpha,
-            lora_dropout=args.lora_dropout,
-            target_modules="all-linear",
-            use_gradient_checkpointing="unsloth",
-            random_state=args.seed,
-        )
-        print("LoRA initialized via FastLanguageModel.get_peft_model", flush=True)
-
     except Exception as _e:
-        print(f"Unsloth unavailable ({_e}), falling back to AutoModelForCausalLM + PEFT", flush=True)
-        from peft import LoraConfig, get_peft_model
+        print(f"FastLanguageModel load failed ({_e}), using AutoModelForCausalLM", flush=True)
         from transformers import AutoModelForCausalLM, AutoTokenizer
-
-        print(f"Loading tokenizer: {args.model_id}", flush=True)
         tokenizer = AutoTokenizer.from_pretrained(args.model_id)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
-
-        print(f"Loading base model: {args.model_id}", flush=True)
-        base_model = AutoModelForCausalLM.from_pretrained(
+        model = AutoModelForCausalLM.from_pretrained(
             args.model_id,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             device_map={"": 0},
             low_cpu_mem_usage=True,
         )
 
-        _stop_dropper.set()
-        torch.cuda.empty_cache()
-        free_gb = torch.cuda.mem_get_info()[0] / 1e9
-        print(f"Base model loaded. GPU free={free_gb:.1f}GB", flush=True)
+    _stop_dropper.set()
+    torch.cuda.empty_cache()
+    free_gb = torch.cuda.mem_get_info()[0] / 1e9
+    print(f"Base model loaded (unsloth={_unsloth_loaded}). GPU free={free_gb:.1f}GB", flush=True)
 
+    # ── Step 2: apply LoRA (on the already-loaded model — no reload on failure) ───
+    # Try FastLanguageModel.get_peft_model first (covers MoE/Mamba expert layers).
+    # Unsloth 2026.6.x raises "No layers to finetune" for Nemotron-H with all-linear;
+    # fall back to standard peft.get_peft_model on the Unsloth-patched model instead.
+    if _unsloth_loaded:
+        try:
+            model = FastLanguageModel.get_peft_model(
+                model,
+                r=args.lora_r,
+                lora_alpha=args.lora_alpha,
+                lora_dropout=args.lora_dropout,
+                target_modules="all-linear",
+                use_gradient_checkpointing="unsloth",
+                random_state=args.seed,
+            )
+            _lora_via_unsloth = True
+            print("LoRA initialized via FastLanguageModel.get_peft_model", flush=True)
+        except Exception as _e:
+            print(f"FastLanguageModel.get_peft_model failed ({_e})", flush=True)
+            print("Falling back to standard PEFT on Unsloth-patched model", flush=True)
+
+    if not _lora_via_unsloth:
+        from peft import LoraConfig, get_peft_model as _std_get_peft_model
         lora_config = LoraConfig(
             r=args.lora_r,
             lora_alpha=args.lora_alpha,
@@ -185,7 +189,7 @@ def main():
                              "gate_proj", "up_proj", "down_proj"],
             task_type="CAUSAL_LM",
         )
-        model = get_peft_model(base_model, lora_config)
+        model = _std_get_peft_model(model, lora_config)
         print("LoRA initialized via PEFT get_peft_model", flush=True)
 
     _patch_mamba_fastpath(model)
@@ -195,7 +199,8 @@ def main():
     # gradient_checkpointing_enable() path, but _set_gradient_checkpointing() is fully
     # implemented and walks all GradientCheckpointingLayer modules.
     # SFTConfig must keep gradient_checkpointing=False to avoid a second call.
-    if not _unsloth_loaded:
+    # Unsloth's use_gradient_checkpointing="unsloth" handles this when _lora_via_unsloth.
+    if not _lora_via_unsloth:
         import functools
         _gc_func = functools.partial(torch.utils.checkpoint.checkpoint, use_reentrant=False)
         try:

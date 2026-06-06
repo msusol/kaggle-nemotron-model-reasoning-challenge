@@ -9,28 +9,29 @@
 #           Steady state after load: ~83 GB committed, ~47 GB free.
 #
 #   Step 2: Training container writes .trainer_model_ready flag when loaded.
-#           We detect it here and start the vLLM FP8 sidecar.
+#           We detect it here and start the vLLM NVFP4 sidecar (default).
 #           A 3s Alpine dropper keeps page cache low during vLLM loading.
-#           FP8 load peak: 83 + ~10 (page cache, aggressively dropped) + 32 (CUDA) ~= 125 GB.
-#           Steady state: ~120 GB (83 training + 37 vLLM).
+#           NVFP4 load peak: 83 + ~12 (page cache, aggressively dropped) + 20 (CUDA) ~= 115 GB.
+#           Steady state: ~108 GB (83 training + 25 vLLM). Set SIDECAR_MODEL=FP8 for ~120 GB.
 #
 #   Step 3: After vLLM is healthy and initial LoRA is loaded, write .vllm_sidecar_ready.
 #           Training container detects it and starts the GRPO loop.
 #
-# Architecture:
+# Architecture (NVFP4 default):
 #   nemotron-gb10       (BF16, --network=host) ~83 GB  train_grpo_sidecar.py
-#   nemotron-vllm-gb10  (FP8,  --network=host) ~37 GB  vllm.entrypoints.openai.api_server
-#   Total: ~120 GB (10 GB headroom)
+#   nemotron-vllm-gb10  (NVFP4, --network=host) ~25 GB  vllm.entrypoints.openai.api_server
+#   Total: ~108 GB (22 GB headroom)
 #
 # Usage (always inside tmux):
 #   tmux new -s grpo_v10
 #   RUN_NAME=grpo_v10 bash scripts/run_grpo_sidecar.sh
 #
 # Env vars:
-#   SIDECAR_MODEL      FP8 (default) or NVFP4
+#   SIDECAR_MODEL      NVFP4 (default, ~25 GB) or FP8 (~37 GB)
 #   SIDECAR_PORT       8000 (default)
 #   ROLLOUT_SYNC_STEPS 50 (default)
 #   RUN_NAME           grpo_v10_<timestamp> (default)
+#   VLLM_ALREADY_UP    0 (default) — set to 1 to skip vLLM startup on trainer retry
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,9 +42,10 @@ if [[ -f "${WORKSPACE}/.env" ]]; then
 fi
 
 # ── Config ──────────────────────────────────────────────────────────────────
-SIDECAR_MODEL="${SIDECAR_MODEL:-FP8}"
+SIDECAR_MODEL="${SIDECAR_MODEL:-NVFP4}"   # NVFP4 ~25 GB (27 GB headroom); FP8 ~37 GB (10 GB headroom)
 SIDECAR_PORT="${SIDECAR_PORT:-8000}"
 ROLLOUT_SYNC_STEPS="${ROLLOUT_SYNC_STEPS:-50}"
+VLLM_ALREADY_UP="${VLLM_ALREADY_UP:-0}"  # set to 1 to reuse a running vLLM on trainer retry
 RUN_NAME="${RUN_NAME:-grpo_v10_$(date +%Y%m%d_%H%M%S)}"
 ADAPTER_OUT="/workspace/output/adapter_${RUN_NAME}"
 OUTPUT_DIR="${WORKSPACE}/output/adapter_${RUN_NAME}"
@@ -74,13 +76,24 @@ echo "Output dir:      ${OUTPUT_DIR}"
 echo "Log:             ${LOG_FILE}"
 
 # ── Cleanup on exit ──────────────────────────────────────────────────────────
+# vLLM takes 10-15 min to start. On trainer OOM/failure, leave it running so
+# the next retry can skip the startup cost via VLLM_ALREADY_UP=1.
 _cleanup() {
-  echo "Stopping vLLM sidecar..."
-  docker stop "nemotron-vllm-sidecar" 2>/dev/null || true
-  docker rm -f "nemotron-vllm-sidecar" 2>/dev/null || true
-  echo "Resuming paused containers..."
+  local exit_code=$?
   bash "${SCRIPT_DIR}/services.sh" resume || true
   systemctl --user start gnome-remote-desktop.service 2>/dev/null || true
+  if [[ ${exit_code} -eq 0 ]]; then
+    echo "Training complete — stopping vLLM sidecar..."
+    docker stop "nemotron-vllm-sidecar" 2>/dev/null || true
+    docker rm -f "nemotron-vllm-sidecar" 2>/dev/null || true
+  else
+    echo ""
+    echo "Trainer exited (code ${exit_code}) — vLLM sidecar LEFT RUNNING (saves 10-15 min restart)."
+    echo "To retry trainer only:"
+    echo "  VLLM_ALREADY_UP=1 RUN_NAME=grpo_v10_retry bash scripts/run_grpo_sidecar.sh"
+    echo "To stop vLLM manually:"
+    echo "  docker stop nemotron-vllm-sidecar && docker rm -f nemotron-vllm-sidecar"
+  fi
 }
 trap _cleanup EXIT
 
@@ -89,15 +102,16 @@ systemctl --user stop gnome-remote-desktop.service 2>/dev/null || true
 echo "Pausing non-training containers..."
 bash "${SCRIPT_DIR}/services.sh" pause || true
 
-GPU_MB=$(nvidia-smi --query-compute-apps=used_gpu_memory --format=csv,noheader,nounits 2>/dev/null | \
-         awk '{sum+=$1} END{print sum+0}')
-echo "GPU compute-apps usage: ${GPU_MB} MiB"
-if [[ "${GPU_MB:-0}" -gt 1024 ]]; then
-  echo "ABORT: GPU has ${GPU_MB} MiB — stop all GPU workloads first." >&2
-  exit 1
+if [[ "${VLLM_ALREADY_UP}" != "1" ]]; then
+  GPU_MB=$(nvidia-smi --query-compute-apps=used_gpu_memory --format=csv,noheader,nounits 2>/dev/null | \
+           awk '{sum+=$1} END{print sum+0}')
+  echo "GPU compute-apps usage: ${GPU_MB} MiB"
+  if [[ "${GPU_MB:-0}" -gt 1024 ]]; then
+    echo "ABORT: GPU has ${GPU_MB} MiB — stop all GPU workloads first." >&2
+    exit 1
+  fi
+  docker rm -f "nemotron-vllm-sidecar" 2>/dev/null || true
 fi
-
-docker rm -f "nemotron-vllm-sidecar" 2>/dev/null || true
 docker rm -f "nemotron-grpo-${RUN_NAME}" 2>/dev/null || true
 
 echo "Dropping page cache (pass 1)..."
@@ -232,6 +246,20 @@ while [[ ! -f "${TRAINER_READY_FLAG}" ]]; do
 done
 echo "TRAINER_MODEL_READY — $(cat "${TRAINER_READY_FLAG}")"
 
+# ── VLLM_ALREADY_UP: skip vLLM startup if sidecar is already running ─────────
+if [[ "${VLLM_ALREADY_UP}" == "1" ]]; then
+  echo "VLLM_ALREADY_UP=1 — checking existing sidecar health..."
+  if curl -sf "http://localhost:${SIDECAR_PORT}/health" >/dev/null 2>&1; then
+    echo "vLLM sidecar healthy — skipping startup sequence."
+    echo "vllm_ready=true sidecar_model=${SIDECAR_MODEL} (reused)" > "${VLLM_READY_FLAG}"
+  else
+    echo "WARNING: sidecar not responding — falling back to full startup."
+    VLLM_ALREADY_UP=0
+  fi
+fi
+
+if [[ "${VLLM_ALREADY_UP}" != "1" ]]; then
+
 # ── STEP 3: Drop page cache before vLLM load ─────────────────────────────────
 echo "Dropping page cache before vLLM load..."
 sync
@@ -241,7 +269,7 @@ docker run --rm --privileged -v /:/host alpine sh -c \
   2>/dev/null || true
 
 # ── STEP 4: Start vLLM sidecar with aggressive page-cache dropper ─────────────
-# FP8 load peak: 83 GB (trainer stable) + ~10 GB (page cache, 3s dropper) + 32 GB (CUDA) ≈ 125 GB
+# NVFP4 load peak: 83 GB (trainer stable) + ~12 GB (page cache, 3s dropper) + 20 GB (CUDA) ≈ 115 GB
 # A background Alpine dropper every 3s keeps page cache from accumulating.
 echo ""
 echo "Starting vLLM sidecar (${SIDECAR_MODEL} → ${VLLM_MODEL_ID}, gpu_util=${VLLM_GPU_MEM_UTIL})..."
@@ -322,6 +350,8 @@ fi
 # ── STEP 7: Signal trainer that vLLM is ready ────────────────────────────────
 echo "vllm_ready=true sidecar_model=${SIDECAR_MODEL}" > "${VLLM_READY_FLAG}"
 echo "VLLM_READY flag written — trainer will now start the GRPO loop."
+
+fi  # end VLLM_ALREADY_UP startup block
 
 # ── STEP 8: Follow trainer logs ──────────────────────────────────────────────
 echo ""

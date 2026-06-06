@@ -121,18 +121,19 @@ if [[ "${VLLM_ALREADY_UP}" != "1" ]]; then
   docker rm -f "nemotron-grpo-${RUN_NAME}" 2>/dev/null || true
 fi
 
-echo "Dropping page cache (pass 1)..."
-sync
-docker run --rm --privileged -v /:/host alpine sh -c \
-  'echo 3 > /proc/sys/vm/drop_caches \
-   && echo 1048576 > /proc/sys/vm/min_free_kbytes \
-   && echo 500 > /proc/sys/vm/vfs_cache_pressure \
-   && swapoff /host/swap.img 2>/dev/null; swapon /host/swap.img 2>/dev/null; true' \
-  2>/dev/null || true
+if [[ "${VLLM_ALREADY_UP}" != "1" ]]; then
+  echo "Dropping page cache (pass 1)..."
+  sync
+  docker run --rm --privileged -v /:/host alpine sh -c \
+    'echo 3 > /proc/sys/vm/drop_caches \
+     && echo 1048576 > /proc/sys/vm/min_free_kbytes \
+     && echo 500 > /proc/sys/vm/vfs_cache_pressure \
+     && swapoff /host/swap.img 2>/dev/null; swapon /host/swap.img 2>/dev/null; true' \
+    2>/dev/null || true
 
-_run_preflight() {
-  docker run --rm --privileged -e NVIDIA_VISIBLE_DEVICES=all nemotron-gb10:latest \
-    python3 -c "
+  _run_preflight() {
+    docker run --rm --privileged -e NVIDIA_VISIBLE_DEVICES=all nemotron-gb10:latest \
+      python3 -c "
 import torch
 torch.cuda.init(); torch.cuda.empty_cache()
 free, total = torch.cuda.mem_get_info()
@@ -143,30 +144,31 @@ if free < 70e9:
 elif used > 20e9:
     print(f'PREFLIGHT_FAIL {used/1e9:.1f}GB stale allocs')
 " 2>&1
-}
+  }
 
-echo "GPU pre-flight..."
-_PREFLIGHT=$(_run_preflight)
-echo "${_PREFLIGHT}" | grep -E "^GPU|^PREFLIGHT"
-
-if echo "${_PREFLIGHT}" | grep -q "^PREFLIGHT_FAIL"; then
-  docker run --rm --privileged alpine sh -c \
-    'rmmod nvidia_uvm 2>/dev/null && modprobe nvidia_uvm 2>/dev/null || true'
+  echo "GPU pre-flight..."
   _PREFLIGHT=$(_run_preflight)
   echo "${_PREFLIGHT}" | grep -E "^GPU|^PREFLIGHT"
-  if echo "${_PREFLIGHT}" | grep -q "^PREFLIGHT_FAIL"; then
-    echo "Pre-flight failed — aborting."
-    exit 1
-  fi
-fi
 
-echo "Dropping page cache (pass 2)..."
-sync
-docker run --rm --privileged -v /:/host alpine sh -c \
-  'echo 3 > /proc/sys/vm/drop_caches \
-   && echo 1048576 > /proc/sys/vm/min_free_kbytes \
-   && echo 500 > /proc/sys/vm/vfs_cache_pressure' \
-  2>/dev/null || true
+  if echo "${_PREFLIGHT}" | grep -q "^PREFLIGHT_FAIL"; then
+    docker run --rm --privileged alpine sh -c \
+      'rmmod nvidia_uvm 2>/dev/null && modprobe nvidia_uvm 2>/dev/null || true'
+    _PREFLIGHT=$(_run_preflight)
+    echo "${_PREFLIGHT}" | grep -E "^GPU|^PREFLIGHT"
+    if echo "${_PREFLIGHT}" | grep -q "^PREFLIGHT_FAIL"; then
+      echo "Pre-flight failed — aborting."
+      exit 1
+    fi
+  fi
+
+  echo "Dropping page cache (pass 2)..."
+  sync
+  docker run --rm --privileged -v /:/host alpine sh -c \
+    'echo 3 > /proc/sys/vm/drop_caches \
+     && echo 1048576 > /proc/sys/vm/min_free_kbytes \
+     && echo 500 > /proc/sys/vm/vfs_cache_pressure' \
+    2>/dev/null || true
+fi
 
 # ── Remap SFT adapter to GRPO key format (one-time, ~10s) ────────────────────
 # SFT has 12,008 Unsloth per-expert keys (backbone.layers, no .default.).

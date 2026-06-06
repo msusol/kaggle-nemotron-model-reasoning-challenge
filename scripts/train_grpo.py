@@ -18,7 +18,6 @@ Usage (via run_grpo.sh):
 import argparse
 import csv
 import functools
-import json
 import importlib.machinery
 import math
 import re
@@ -80,7 +79,12 @@ def answers_match(pred: str, truth: str, rel_tol: float = 1e-4) -> bool:
 def parse_args():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--adapter-dir",     required=True, help="Best v0.5 SFT adapter to init from")
+    ap.add_argument("--adapter-dir",     required=True,
+                    help="SFT adapter in Unsloth format (backbone.layers, per-expert LoRA)")
+    ap.add_argument("--grpo-warmstart",  default=None,
+                    help="Pre-remapped adapter in GRPO format (model.layers, .default. keys). "
+                         "Used by the PeftModel fallback path if Unsloth fails. "
+                         "Build with: python scripts/remap_sft_adapter_for_grpo.py")
     ap.add_argument("--train-file",      required=True, help="data/train.csv")
     ap.add_argument("--output-dir",      default=None)
     ap.add_argument("--model-id",        default="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16")
@@ -115,7 +119,6 @@ def _make_cache_dropper(interval: float = 30.0):
 
 import torch
 from datasets import Dataset
-from peft import PeftModel
 from trl import GRPOConfig, GRPOTrainer
 
 
@@ -130,83 +133,90 @@ def main():
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     print(f"Output: {args.output_dir}", flush=True)
 
-    # ── load base model + rebuild Unsloth LoRA structure + load SFT weights ──
-    # Why not PeftModel.from_pretrained or FastLanguageModel.from_pretrained(adapter_dir)?
+    # ── load base model + SFT LoRA adapter ──────────────────────────────────
+    # Unsloth's FastLanguageModel.from_pretrained always creates fused-MoE LoRA
+    # (232 modules, model.layers naming) in GRPO mode — even when loading a
+    # per-expert SFT adapter (12,008 keys, backbone.layers naming). The SFT keys
+    # are simply "missing" from the GRPO model structure and never load.
     #
-    # Unsloth saves keys as `backbone.layers.X.*.lora_A.weight` (no `.default.`).
-    # Standard PEFT / FastLanguageModel.from_pretrained both fail to load them:
-    #   - PeftModel.from_pretrained: expects `model.layers.X.*.lora_A.default.weight` → 0 keys loaded
-    #   - FastLanguageModel.from_pretrained(adapter_dir): only creates 232 standard modules,
-    #     ignores all 12,008 MoE expert keys → model trains from base weights → OOM
+    # Fix: accept the 232 Unsloth modules, then manually inject the 232 warm-start
+    # weights from the pre-remapped adapter (scripts/remap_sft_adapter_for_grpo.py).
+    # The remapped adapter has model.layers keys with .default. infix that exactly
+    # match the GRPO model's parameter names.
     #
-    # Correct approach:
-    #   1. Load base model with FastLanguageModel (patches MoE experts as individual nn.Linear)
-    #   2. FastLanguageModel.get_peft_model with SAME config as SFT → creates 12,008 modules
-    #      under `backbone.layers` path (matches saved keys)
-    #   3. Manually load saved weights via set_peft_model_state_dict
-    #      (PEFT auto-handles lora_A.weight → lora_A.default.weight remapping)
+    # Do NOT try a fallback to AutoModelForCausalLM — loading a second copy of
+    # the 30B model while the first is in GPU memory causes OOM (exit 137).
     _stop = _make_cache_dropper()
-    try:
-        from unsloth import FastLanguageModel
-        from peft import set_peft_model_state_dict
-        from safetensors.torch import load_file as st_load
+    from unsloth import FastLanguageModel
 
-        # Step 1: load base model
-        print(f"Loading base model via FastLanguageModel: {args.model_id}", flush=True)
-        base_model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=args.model_id,
-            dtype=torch.bfloat16,
-            load_in_4bit=False,
-            full_finetuning=False,
-            trust_remote_code=False,  # MUST be False — hub cache has buggy prepare_inputs_for_generation
-            unsloth_force_compile=False,
-            attn_implementation="eager",
-        )
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        print("Base model loaded — MoE layers patched", flush=True)
+    print(f"Loading base + SFT adapter via FastLanguageModel: {args.adapter_dir}", flush=True)
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name=args.adapter_dir,
+        dtype=torch.bfloat16,
+        load_in_4bit=False,
+        full_finetuning=False,
+        trust_remote_code=False,      # MUST be False — hub cache has buggy prepare_inputs_for_generation
+        unsloth_force_compile=False,
+        attn_implementation="eager",
+        # NOTE: do NOT pass is_trainable=True — it propagates to NemotronHForCausalLM.__init__
+        # which rejects it as an unexpected kwarg.
+    )
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
 
-        # Step 2: rebuild same LoRA structure as SFT training
-        adapter_cfg = json.loads((Path(args.adapter_dir) / "adapter_config.json").read_text())
-        model = FastLanguageModel.get_peft_model(
-            base_model,
-            r=adapter_cfg.get("r", 32),
-            lora_alpha=adapter_cfg.get("lora_alpha", 32),
-            target_modules=adapter_cfg.get("target_modules",
-                ["q_proj","k_proj","v_proj","o_proj","in_proj","out_proj","up_proj","down_proj"]),
-            lora_dropout=adapter_cfg.get("lora_dropout", 0),
-            bias=adapter_cfg.get("bias", "none"),
-            use_gradient_checkpointing=False,
-            random_state=args.seed,
-        )
-        n_lora_modules = sum(1 for n, _ in model.named_parameters() if ".lora_" in n)
-        print(f"LoRA structure created: {n_lora_modules} params", flush=True)
+    # Mark LoRA params trainable for GRPO
+    for _n, _p in model.named_parameters():
+        if ".lora_" in _n:
+            _p.requires_grad_(True)
 
-        # Step 3: load SFT weights — PEFT handles lora_A.weight → lora_A.default.weight
-        st_path = Path(args.adapter_dir) / "adapter_model.safetensors"
-        saved_state = st_load(str(st_path))
-        load_result = set_peft_model_state_dict(model, saved_state)
-        n_missing = len(load_result.missing_keys) if load_result.missing_keys else 0
-        n_unexpected = len(load_result.unexpected_keys) if load_result.unexpected_keys else 0
-        print(f"SFT weights loaded: {len(saved_state)} keys, missing={n_missing}, unexpected={n_unexpected}", flush=True)
-        if n_missing:
-            print(f"  First missing: {load_result.missing_keys[:3]}", flush=True)
+    n_lora = sum(1 for n, _ in model.named_parameters() if ".lora_" in n)
+    print(f"Unsloth created {n_lora} LoRA modules (GRPO fused-MoE mode)", flush=True)
 
-    except Exception as e:
-        print(f"Unsloth load failed ({e}), falling back to AutoModelForCausalLM + PeftModel", flush=True)
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-        tokenizer = AutoTokenizer.from_pretrained(args.model_id)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        _base = AutoModelForCausalLM.from_pretrained(
-            args.model_id, dtype=torch.bfloat16,
-            device_map={"": 0}, low_cpu_mem_usage=True,
-        )
-        model = PeftModel.from_pretrained(_base, args.adapter_dir, is_trainable=True)
+    # Inject SFT warm-start weights into the Unsloth GRPO modules.
+    # The remapped adapter was built by scripts/remap_sft_adapter_for_grpo.py:
+    #   backbone.layers → model.layers, lora_A.weight → lora_A.default.weight
+    # These 232 keys match exactly the GRPO model's parameter names.
+    if args.grpo_warmstart:
+        from safetensors.torch import load_file as _st_load
+        _ws_path = Path(args.grpo_warmstart) / "adapter_model.safetensors"
+        if _ws_path.exists():
+            print(f"Injecting warm-start weights from {_ws_path}", flush=True)
+            _ws = _st_load(str(_ws_path), device="cpu")
+            _params = dict(model.named_parameters())
+            _loaded, _missing = 0, []
+            for _k, _v in _ws.items():
+                if _k in _params:
+                    _params[_k].data.copy_(_v.to(_params[_k].dtype).to(_params[_k].device))
+                    _loaded += 1
+                else:
+                    _missing.append(_k)
+            print(f"Warm-start: injected {_loaded}/{len(_ws)} keys", flush=True)
+            if _missing:
+                print(f"Warm-start: {len(_missing)} keys not found: {_missing[:3]}", flush=True)
+            del _ws, _params
+            torch.cuda.empty_cache()
+        else:
+            print(f"WARNING: remapped adapter not found at {_ws_path} — LoRA starts cold", flush=True)
+    else:
+        print("WARNING: --grpo-warmstart not provided — LoRA starts from random init. "
+              "Run scripts/remap_sft_adapter_for_grpo.py first.", flush=True)
+
+    print("Model ready for GRPO training", flush=True)
 
     _stop.set()
     torch.cuda.empty_cache()
     print(f"Model loaded. GPU free={torch.cuda.mem_get_info()[0]/1e9:.1f}GB", flush=True)
+
+    # ── Silence generation_config warnings ───────────────────────────────────
+    # (1) max_length=262144 from model's generation_config.json conflicts with
+    #     max_new_tokens passed by GRPOTrainer — clear it so max_new_tokens wins cleanly.
+    # (2) pad_token_id set on generation_config prevents TRL from passing it as
+    #     a separate kwarg (deprecated mixing of config + kwargs).
+    if hasattr(model, "generation_config") and model.generation_config is not None:
+        model.generation_config.max_length = None
+        model.generation_config.max_new_tokens = args.max_new_tokens
+        if tokenizer.pad_token_id is not None:
+            model.generation_config.pad_token_id = tokenizer.pad_token_id
 
     # ── Mamba fast path ──────────────────────────────────────────────────────
     for name, mod in sys.modules.items():

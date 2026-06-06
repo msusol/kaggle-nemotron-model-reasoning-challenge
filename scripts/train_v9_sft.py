@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
-"""v0.9 SFT training — Format 4 from base model, no warmstart.
+"""v0.9 SFT training — Format 4, supports warmstart from a prior adapter.
 
-Trains from the base Nemotron model on data/v0.9_train.jsonl (18,603 examples,
-14 categories). Assistant content = {trace}\n</think>\n\boxed{answer}.
+Trains from the base Nemotron model (or an existing LoRA adapter) on
+data/v0.9_train.jsonl. Assistant content = {trace}\n</think>\n\boxed{answer}.
+
+Two-run coalescing workflow:
+  Run 1 (short):  --max-seq-length 2048  (covers ~3,892 examples ≤ 2048 tok)
+  Run 2 (long):   --min-seq-length 2048 --max-seq-length 7680 \\
+                  --warmstart-adapter /workspace/output/adapter_v9_sft_2k
+  This makes run 2 continue training run 1's adapter on the complementary
+  9,838 examples (2049–7680 tokens), yielding a single coalesced adapter.
 
 Usage (via run_train_v9.sh):
     python scripts/train_v9_sft.py \\
@@ -38,7 +45,14 @@ def parse_args():
     ap.add_argument("--model-id",        default="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16")
     ap.add_argument("--max-steps",       type=int,   default=1000)
     ap.add_argument("--learning-rate",   type=float, default=2e-4)
-    ap.add_argument("--max-seq-length",  type=int,   default=8192)
+    ap.add_argument("--max-seq-length",  type=int,   default=7680)
+    ap.add_argument("--min-seq-length",  type=int,   default=0,
+                    help="Skip examples with token count <= this value (use to train on the "
+                         "'balance' dataset after a short-context run). Default 0 = no lower bound.")
+    ap.add_argument("--warmstart-adapter", default=None,
+                    help="Path to a completed LoRA adapter dir. Loads and continues training "
+                         "that adapter instead of creating a new one. Use with --min-seq-length "
+                         "to coalesce two runs into one adapter.")
     ap.add_argument("--batch-size",      type=int,   default=1)
     ap.add_argument("--grad-accum",      type=int,   default=16)
     ap.add_argument("--lora-r",          type=int,   default=32)
@@ -141,7 +155,9 @@ def main():
         print("FastLanguageModel loaded — MoE/Mamba expert layers patched for LoRA", flush=True)
 
     except Exception as _e:
-        print(f"FastLanguageModel load failed ({_e}), using AutoModelForCausalLM", flush=True)
+        import traceback as _tb
+        print(f"FastLanguageModel load failed — falling back to AutoModelForCausalLM", flush=True)
+        _tb.print_exc()
         from transformers import AutoModelForCausalLM, AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(args.model_id)
         if tokenizer.pad_token is None:
@@ -159,17 +175,30 @@ def main():
     print(f"Base model loaded (unsloth={_unsloth_loaded}). GPU free={free_gb:.1f}GB", flush=True)
 
     # ── Step 2: apply LoRA (on the already-loaded model — no reload on failure) ───
-    # Try FastLanguageModel.get_peft_model first (covers MoE/Mamba expert layers).
-    # Unsloth 2026.6.x raises "No layers to finetune" for Nemotron-H with all-linear;
-    # fall back to standard peft.get_peft_model on the Unsloth-patched model instead.
-    if _unsloth_loaded:
+    # "all-linear" triggers "No layers to finetune" in Unsloth 2026.6.x for NemotronH
+    # because Unsloth's discovery logic can't enumerate the patched MoE/Mamba linears.
+    # Explicit names bypass that check and let Unsloth apply its full memory opts
+    # (gradient offloading, etc.) which are only active when _lora_via_unsloth=True.
+    _LORA_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj",
+                     "gate_proj", "up_proj", "down_proj"]
+
+    if args.warmstart_adapter:
+        # Load a completed adapter and continue training it on the new data slice.
+        # The Unsloth-patched model already has MoE experts accessible; PeftModel
+        # simply re-attaches the existing LoRA A/B weights as trainable parameters.
+        from peft import PeftModel
+        print(f"Warmstart: loading adapter from {args.warmstart_adapter}", flush=True)
+        model = PeftModel.from_pretrained(model, args.warmstart_adapter, is_trainable=True)
+        _lora_via_unsloth = _unsloth_loaded  # base is still Unsloth-patched
+        print("Adapter loaded and set to trainable (warmstart mode)", flush=True)
+    elif _unsloth_loaded:
         try:
             model = FastLanguageModel.get_peft_model(
                 model,
                 r=args.lora_r,
                 lora_alpha=args.lora_alpha,
                 lora_dropout=args.lora_dropout,
-                target_modules="all-linear",
+                target_modules=_LORA_TARGETS,
                 use_gradient_checkpointing="unsloth",
                 random_state=args.seed,
             )
@@ -179,14 +208,13 @@ def main():
             print(f"FastLanguageModel.get_peft_model failed ({_e})", flush=True)
             print("Falling back to standard PEFT on Unsloth-patched model", flush=True)
 
-    if not _lora_via_unsloth:
+    if not _lora_via_unsloth and not args.warmstart_adapter:
         from peft import LoraConfig, get_peft_model as _std_get_peft_model
         lora_config = LoraConfig(
             r=args.lora_r,
             lora_alpha=args.lora_alpha,
             lora_dropout=args.lora_dropout,
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                             "gate_proj", "up_proj", "down_proj"],
+            target_modules=_LORA_TARGETS,
             task_type="CAUSAL_LM",
         )
         model = _std_get_peft_model(model, lora_config)
@@ -194,27 +222,38 @@ def main():
 
     _patch_mamba_fastpath(model)
 
-    # ── gradient checkpointing (NemotronH native path) ──────────────────────────
-    # NemotronHForCausalLM.supports_gradient_checkpointing=False blocks the standard
-    # gradient_checkpointing_enable() path, but _set_gradient_checkpointing() is fully
-    # implemented and walks all GradientCheckpointingLayer modules.
-    # SFTConfig must keep gradient_checkpointing=False to avoid a second call.
-    # Unsloth's use_gradient_checkpointing="unsloth" handles this when _lora_via_unsloth.
-    if not _lora_via_unsloth:
-        import functools
-        _gc_func = functools.partial(torch.utils.checkpoint.checkpoint, use_reentrant=False)
-        try:
-            model.base_model.model._set_gradient_checkpointing(
-                enable=True, gradient_checkpointing_func=_gc_func
-            )
-            model.enable_input_require_grads()
-            print("Gradient checkpointing enabled (NemotronH native, use_reentrant=False)", flush=True)
-        except Exception as _e:
-            print(f"Warning: gradient checkpointing unavailable: {_e}", flush=True)
+    # ── gradient checkpointing (NemotronH native path — always apply) ─────────────
+    # NemotronH-native GC must run regardless of LoRA path.
+    # Unsloth's use_gradient_checkpointing="unsloth" in get_peft_model calls the
+    # standard gradient_checkpointing_enable(), which NemotronHForCausalLM blocks via
+    # supports_gradient_checkpointing=False → silent no-op, no GC active.
+    # The native _set_gradient_checkpointing() bypasses that guard and actually works.
+    # Without this: activation memory 20–40 GB → step-0 OOM at seq_len ≥ 4096.
+    import functools
+    _gc_func = functools.partial(torch.utils.checkpoint.checkpoint, use_reentrant=False)
+    try:
+        model.base_model.model._set_gradient_checkpointing(
+            enable=True, gradient_checkpointing_func=_gc_func
+        )
+        model.enable_input_require_grads()
+        print("Gradient checkpointing enabled (NemotronH native, use_reentrant=False)", flush=True)
+    except Exception as _e:
+        print(f"Warning: gradient checkpointing unavailable: {_e}", flush=True)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
     print(f"Trainable: {trainable:,} / Total: {total:,}", flush=True)
+
+    # ── silence PretrainedConfig.use_return_dict FutureWarning ─────────────────
+    # Newer Transformers turns use_return_dict into a property descriptor that fires
+    # a FutureWarning on every access. The NemotronH forward() reads it on every call.
+    # Shadow the class property with a plain instance attribute so the descriptor
+    # is never invoked, and re-apply the warnings filter after Unsloth imports
+    # (which can reset the filter list).
+    _cfg = getattr(model, "config", None)
+    if _cfg is not None and "use_return_dict" not in _cfg.__dict__:
+        _cfg.__dict__["use_return_dict"] = getattr(_cfg, "return_dict", True)
+    warnings.filterwarnings("ignore", category=FutureWarning, message=r".*use_return_dict.*")
 
     # ── override model.max_seq_length before Unsloth tokenizes ─────────────────
     # Unsloth injects a check into SFTTrainer.__init__ that reads getattr(model,
@@ -236,9 +275,40 @@ def main():
         for line in f:
             r = json.loads(line)
             records.append({"messages": r["messages"]})
-            # stratify by category (14 groups) rather than bucket (6 groups) so each
+            # stratify by category (16 groups) rather than bucket (6 groups) so each
             # gradient-accumulation window sees all categories proportionally
             strat_labels.append(r.get("category") or r.get("bucket", "other"))
+
+    # ── pre-filter: drop examples outside [min_seq_length+1, max_seq_length] ────
+    # Upper bound: truncated examples lose </think>\n\boxed{} from labels — bad signal.
+    # Lower bound (optional): skip examples already covered by a prior short-context run
+    # so this run trains only the complementary "balance" slice of the dataset.
+    _filter_desc = f"<= {args.min_seq_length} or > {args.max_seq_length}" if args.min_seq_length else f"> {args.max_seq_length}"
+    print(f"Pre-filtering examples {_filter_desc} tokens...", flush=True)
+    kept_records, kept_labels, n_short, n_long = [], [], 0, 0
+    for r, label in zip(records, strat_labels):
+        msgs = r["messages"]
+        try:
+            text = tokenizer.apply_chat_template(
+                msgs, tokenize=False, add_generation_prompt=False, enable_thinking=True
+            )
+        except TypeError:
+            text = tokenizer.apply_chat_template(
+                msgs, tokenize=False, add_generation_prompt=False
+            )
+        n_tok = len(tokenizer(text, truncation=False, add_special_tokens=False)["input_ids"])
+        if n_tok <= args.min_seq_length:
+            n_short += 1
+        elif n_tok > args.max_seq_length:
+            n_long += 1
+        else:
+            kept_records.append(r)
+            kept_labels.append(label)
+    if args.min_seq_length:
+        print(f"  Kept {len(kept_records):,} / skipped-short {n_short:,} (<={args.min_seq_length} tok) / dropped-long {n_long:,} (>{args.max_seq_length} tok)", flush=True)
+    else:
+        print(f"  Kept {len(kept_records):,} / dropped {n_long:,} (>{args.max_seq_length} tok)", flush=True)
+    records, strat_labels = kept_records, kept_labels
 
     dataset = Dataset.from_list(records)
     print(f"Dataset: {len(dataset)} examples", flush=True)
@@ -294,6 +364,23 @@ def main():
         def __init__(self, *a, stratified_order=None, **kw):
             super().__init__(*a, **kw)
             self._stratified_order = stratified_order
+
+        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+            try:
+                return super().compute_loss(model, inputs, return_outputs, num_items_in_batch)
+            except RuntimeError as _err:
+                if "view and is being modified inplace" not in str(_err):
+                    raise
+                # UnslothFusedLossBackward returns a view tensor; transformers Trainer's
+                # `loss *= num_processes` (a no-op scalar for single GPU) triggers the
+                # autograd constraint. Fall back to base Trainer.compute_loss which
+                # avoids the inplace multiply by going through the standard loss path.
+                from transformers import Trainer as _BaseTrainer
+                print("Warning: UnslothFusedLossBackward inplace error — falling back to "
+                      "standard loss computation", flush=True)
+                return _BaseTrainer.compute_loss(
+                    self, model, inputs, return_outputs, num_items_in_batch
+                )
 
         def get_train_dataloader(self):
             if self._stratified_order is None:

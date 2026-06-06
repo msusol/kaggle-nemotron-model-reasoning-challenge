@@ -111,13 +111,14 @@ ionice -c 2 -n 7 docker run --privileged \
   nemotron-gb10:latest \
   python scripts/train_grpo.py \
     --adapter-dir     /workspace/output/adapter_v5_sft_unsloth \
+    --grpo-warmstart  /workspace/output/adapter_v5_sft_grpo_warmstart \
     --train-file      /workspace/data/train.csv \
     --output-dir      "${ADAPTER_OUT}" \
     --model-id        nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 \
     --num-steps       500 \
-    --num-generations 4 \
+    --num-generations 2 \
     --learning-rate   1e-6 \
-    --max-new-tokens  512 \
+    --max-new-tokens  1024 \
     --kl-coeff        0.04 \
     --batch-size      1 \
     --seed            3407 \

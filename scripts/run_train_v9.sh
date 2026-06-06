@@ -128,7 +128,7 @@ ionice -c 2 -n 7 docker run --privileged \
     --model-id       nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 \
     --max-steps      1000 \
     --learning-rate  2e-4 \
-    --max-seq-length 8192 \
+    --max-seq-length 7680 \
     --batch-size     1 \
     --grad-accum     16 \
     --lora-r         32 \

@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 *.egg-info/
 .cache/
+.ipynb_checkpoints/
 
 # Large generated data files — regenerate with extraction/conversion scripts
 data/v0.4_train.jsonl
@@ -15,6 +16,9 @@ data/nemo_dataset/nemo_valid.jsonl
 data/nemo_dataset/valid_labels.jsonl
 data/v0.1_train.csv
 data/v0.5_train.jsonl
+data/v0.9_train.jsonl
+data/v0.9_valid.jsonl
+unsloth_compiled_cache/
 .paused_containers
 .idea/
 submission.zip

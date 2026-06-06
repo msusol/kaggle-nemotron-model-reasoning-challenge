@@ -57,7 +57,9 @@ mkdir -p "${WORKSPACE}/output" "${OUTPUT_DIR}"
 
 TRAINER_READY_FLAG="${OUTPUT_DIR}/.trainer_model_ready"
 VLLM_READY_FLAG="${OUTPUT_DIR}/.vllm_sidecar_ready"
-rm -f "${TRAINER_READY_FLAG}" "${VLLM_READY_FLAG}"
+if [[ "${VLLM_ALREADY_UP}" != "1" ]]; then
+  rm -f "${TRAINER_READY_FLAG}" "${VLLM_READY_FLAG}"
+fi
 
 case "${SIDECAR_MODEL}" in
   NVFP4)

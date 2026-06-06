@@ -26,7 +26,6 @@ import argparse
 import contextlib
 import csv
 import functools
-import json
 import importlib.machinery
 import math
 import re
@@ -86,10 +85,13 @@ def answers_match(pred: str, truth: str, rel_tol: float = 1e-4) -> bool:
 def parse_args():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--adapter-dir",        required=True,  help="SFT adapter to init from")
+    ap.add_argument("--adapter-dir",        required=True,
+                    help="SFT adapter dir (Unsloth format); passed to FastLanguageModel.from_pretrained")
+    ap.add_argument("--grpo-warmstart",     default=None,
+                    help="Pre-remapped 232-key adapter (model.layers, .default. keys). "
+                         "Build with: python scripts/remap_sft_adapter_for_grpo.py")
     ap.add_argument("--train-file",         required=True,  help="data/train.csv")
     ap.add_argument("--output-dir",         default=None)
-    ap.add_argument("--model-id",           default="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16")
     ap.add_argument("--vllm-server-url",    default="http://localhost:8000",
                     help="vLLM sidecar base URL (--network=host so localhost works)")
     ap.add_argument("--rollout-adapter-path", default=None,
@@ -129,7 +131,6 @@ def _make_cache_dropper(interval: float = 30.0):
 
 import torch
 from datasets import Dataset
-from peft import PeftModel
 from safetensors import safe_open
 from safetensors.torch import save_file as st_save_file
 
@@ -257,56 +258,63 @@ def main():
     trainer_ready_flag.unlink(missing_ok=True)
     vllm_ready_flag.unlink(missing_ok=True)
 
-    # ── Model loading (identical to train_grpo.py) ───────────────────────────
+    # ── Model loading (aligned with train_grpo.py) ──────────────────────────
+    # Unsloth's FastLanguageModel.from_pretrained always creates fused-MoE LoRA
+    # (232 modules, model.layers naming) for NemotronH in GRPO mode — even when
+    # loading a per-expert SFT adapter (12,008 keys, backbone.layers naming).
+    # The 11,776 per-expert SFT keys are simply missing from the GRPO structure
+    # and never load. Fix: accept the 232 Unsloth modules, then inject the 232
+    # warm-start weights from the pre-remapped adapter (remap_sft_adapter_for_grpo.py).
+    # Do NOT fall back to AutoModelForCausalLM — loading a second 30B copy causes OOM.
     _stop = _make_cache_dropper()
-    try:
-        from unsloth import FastLanguageModel
-        from peft import set_peft_model_state_dict
+    from unsloth import FastLanguageModel
 
-        print(f"Loading base model: {args.model_id}", flush=True)
-        base_model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=args.model_id,
-            dtype=torch.bfloat16,
-            load_in_4bit=False,
-            full_finetuning=False,
-            trust_remote_code=False,
-            unsloth_force_compile=False,
-            attn_implementation="eager",
-        )
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        print("Base model loaded — MoE layers patched", flush=True)
+    print(f"Loading base + SFT adapter via FastLanguageModel: {args.adapter_dir}", flush=True)
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name=args.adapter_dir,
+        dtype=torch.bfloat16,
+        load_in_4bit=False,
+        full_finetuning=False,
+        trust_remote_code=False,
+        unsloth_force_compile=False,
+        attn_implementation="eager",
+    )
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
 
-        adapter_cfg = json.loads((Path(args.adapter_dir) / "adapter_config.json").read_text())
-        model = FastLanguageModel.get_peft_model(
-            base_model,
-            r=adapter_cfg.get("r", 32),
-            lora_alpha=adapter_cfg.get("lora_alpha", 32),
-            target_modules=adapter_cfg.get("target_modules",
-                ["q_proj","k_proj","v_proj","o_proj","in_proj","out_proj","up_proj","down_proj"]),
-            lora_dropout=adapter_cfg.get("lora_dropout", 0),
-            bias=adapter_cfg.get("bias", "none"),
-            use_gradient_checkpointing=False,
-            random_state=args.seed,
-        )
-        st_path = Path(args.adapter_dir) / "adapter_model.safetensors"
-        saved_state = {k: v for k, v in
-                       __import__("safetensors.torch", fromlist=["load_file"]).load_file(str(st_path)).items()}
-        load_result = set_peft_model_state_dict(model, saved_state)
-        n_missing = len(load_result.missing_keys) if load_result.missing_keys else 0
-        print(f"SFT weights loaded: {len(saved_state)} keys, missing={n_missing}", flush=True)
+    for _n, _p in model.named_parameters():
+        if ".lora_" in _n:
+            _p.requires_grad_(True)
 
-    except Exception as e:
-        print(f"Unsloth load failed ({e}), falling back to AutoModelForCausalLM", flush=True)
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-        tokenizer = AutoTokenizer.from_pretrained(args.model_id)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        _base = AutoModelForCausalLM.from_pretrained(
-            args.model_id, dtype=torch.bfloat16,
-            device_map={"": 0}, low_cpu_mem_usage=True,
-        )
-        model = PeftModel.from_pretrained(_base, args.adapter_dir, is_trainable=True)
+    n_lora = sum(1 for n, _ in model.named_parameters() if ".lora_" in n)
+    print(f"Unsloth created {n_lora} LoRA modules (GRPO fused-MoE mode)", flush=True)
+
+    if args.grpo_warmstart:
+        from safetensors.torch import load_file as _st_load
+        _ws_path = Path(args.grpo_warmstart) / "adapter_model.safetensors"
+        if _ws_path.exists():
+            print(f"Injecting warm-start weights from {_ws_path}", flush=True)
+            _ws = _st_load(str(_ws_path), device="cpu")
+            _params = dict(model.named_parameters())
+            _loaded, _missing_ws = 0, []
+            for _k, _v in _ws.items():
+                if _k in _params:
+                    _params[_k].data.copy_(_v.to(_params[_k].dtype).to(_params[_k].device))
+                    _loaded += 1
+                else:
+                    _missing_ws.append(_k)
+            print(f"Warm-start: injected {_loaded}/{len(_ws)} keys", flush=True)
+            if _missing_ws:
+                print(f"Warm-start: {len(_missing_ws)} keys not found: {_missing_ws[:3]}",
+                      flush=True)
+            del _ws, _params
+            torch.cuda.empty_cache()
+        else:
+            print(f"WARNING: remapped adapter not found at {_ws_path} — LoRA starts cold",
+                  flush=True)
+    else:
+        print("WARNING: --grpo-warmstart not provided — LoRA starts from random init. "
+              "Run scripts/remap_sft_adapter_for_grpo.py first.", flush=True)
 
     _stop.set()
     torch.cuda.empty_cache()

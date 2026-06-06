@@ -147,6 +147,27 @@ docker run --rm --privileged -v /:/host alpine sh -c \
    && echo 500 > /proc/sys/vm/vfs_cache_pressure' \
   2>/dev/null || true
 
+# ── Remap SFT adapter to GRPO key format (one-time, ~10s) ────────────────────
+# SFT has 12,008 Unsloth per-expert keys (backbone.layers, no .default.).
+# Unsloth creates only 232 fused-MoE keys in GRPO mode (model.layers, .default.).
+# The remap drops the 11,776 per-expert keys and renames the 232 remainder so they
+# exactly match the GRPO model's parameter names for warmstart injection.
+GRPO_WARMSTART_HOST="${WORKSPACE}/output/adapter_v5_sft_grpo_warmstart"
+if [[ ! -f "${GRPO_WARMSTART_HOST}/adapter_model.safetensors" ]]; then
+  echo "Remapping SFT adapter to GRPO format..."
+  docker run --rm \
+    --privileged \
+    -e NVIDIA_VISIBLE_DEVICES=all \
+    -v "${WORKSPACE}":/workspace \
+    -w /workspace \
+    nemotron-gb10:latest \
+    python scripts/remap_sft_adapter_for_grpo.py \
+      --src /workspace/output/adapter_v5_sft_unsloth \
+      --dst /workspace/output/adapter_v5_sft_grpo_warmstart
+else
+  echo "GRPO warmstart adapter already exists: ${GRPO_WARMSTART_HOST}"
+fi
+
 # ── STEP 1: Start training container first ───────────────────────────────────
 # The BF16 training model load peaks at ~126 GB (model + page cache sharing the
 # same unified pool). The container's dropper thread manages this safely.
@@ -174,9 +195,9 @@ docker run --detach \
   nemotron-gb10:latest \
   python scripts/train_grpo_sidecar.py \
     --adapter-dir        /workspace/output/adapter_v5_sft_unsloth \
+    --grpo-warmstart     /workspace/output/adapter_v5_sft_grpo_warmstart \
     --train-file         /workspace/data/train.csv \
     --output-dir         "${ADAPTER_OUT}" \
-    --model-id           nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 \
     --vllm-server-url    "http://localhost:${SIDECAR_PORT}" \
     --rollout-sync-steps "${ROLLOUT_SYNC_STEPS}" \
     --num-steps          500 \

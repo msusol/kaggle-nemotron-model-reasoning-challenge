@@ -42,7 +42,7 @@ if [[ -f "${WORKSPACE}/.env" ]]; then
 fi
 
 # ── Config ──────────────────────────────────────────────────────────────────
-SIDECAR_MODEL="${SIDECAR_MODEL:-NVFP4}"     # FP8 ~37 GB; NVFP4 ~25 GB (needs cutlass-dsl smoke test)
+SIDECAR_MODEL="${SIDECAR_MODEL:-FP8}"     # FP8 ~37 GB; NVFP4 ~25 GB (needs cutlass-dsl smoke test)
 SIDECAR_PORT="${SIDECAR_PORT:-8000}"
 ROLLOUT_SYNC_STEPS="${ROLLOUT_SYNC_STEPS:-50}"
 NUM_STEPS="${NUM_STEPS:-500}"

@@ -49,11 +49,15 @@ NUM_STEPS="${NUM_STEPS:-500}"
 NUM_GENERATIONS="${NUM_GENERATIONS:-4}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-512}"
 VLLM_ALREADY_UP="${VLLM_ALREADY_UP:-0}"  # set to 1 to reuse a running vLLM on trainer retry
+# --enforce-eager disables CUDA graph capture + torch.compile warmup; prevents OOM during kernel
+# compilation on GB10's unified memory (ninja spawns N parallel CUDA compile jobs that spike RAM).
+# Set to 0 once the compile cache is warm (cache is persisted via .cache/vllm_compile mount).
+VLLM_ENFORCE_EAGER="${VLLM_ENFORCE_EAGER:-1}"
 RUN_NAME="${RUN_NAME:-grpo_v10_$(date +%Y%m%d_%H%M%S)}"
 ADAPTER_OUT="/workspace/output/adapter_${RUN_NAME}"
 OUTPUT_DIR="${WORKSPACE}/output/adapter_${RUN_NAME}"
 LOG_FILE="${WORKSPACE}/output/train_${RUN_NAME}.log"
-mkdir -p "${WORKSPACE}/output" "${OUTPUT_DIR}"
+mkdir -p "${WORKSPACE}/output" "${OUTPUT_DIR}" "${WORKSPACE}/.cache/vllm_compile"
 
 TRAINER_READY_FLAG="${OUTPUT_DIR}/.trainer_model_ready"
 VLLM_READY_FLAG="${OUTPUT_DIR}/.vllm_sidecar_ready"
@@ -71,12 +75,18 @@ case "${SIDECAR_MODEL}" in
     ;;
   FP8|*)
     VLLM_MODEL_ID="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8"
-    # Trainer steady-state ≈ 71 GB → ~50 GB free. 0.35×121.69=42.6 GB (model 32 GB + 10.6 GB KV cache).
-    VLLM_GPU_MEM_UTIL="0.35"
+    # Trainer steady-state ≈ 61 GB → ~60 GB free. 0.30×121.69=36.5 GB (model 32 GB + 4.5 GB KV cache).
+    # Reduced from 0.35 to give headroom if --enforce-eager=0 (CUDA graph + compile spikes).
+    VLLM_GPU_MEM_UTIL="0.30"
     NVFP4_ENV=()
     NVFP4_VLLM_ARGS=()
     ;;
 esac
+
+_VLLM_EAGER_ARGS=()
+if [[ "${VLLM_ENFORCE_EAGER}" == "1" ]]; then
+  _VLLM_EAGER_ARGS=(--enforce-eager)
+fi
 
 echo "RUN_NAME:        ${RUN_NAME}"
 echo "SIDECAR_MODEL:   ${SIDECAR_MODEL} (${VLLM_MODEL_ID})"
@@ -295,9 +305,11 @@ docker run --detach \
   --ulimit stack=67108864 \
   -e HF_TOKEN="${HF_TOKEN}" \
   -e HF_HOME=/workspace/.cache/huggingface \
+  -e VLLM_TORCH_COMPILE_WORKERS=1 \
   "${NVFP4_ENV[@]}" \
   -v "${WORKSPACE}":/workspace \
   -v "${WORKSPACE}/.cache/triton":/home/ubuntu/.triton \
+  -v "${WORKSPACE}/.cache/vllm_compile":/root/.cache/vllm \
   -w /workspace \
   nemotron-vllm-gb10:latest \
   python -m vllm.entrypoints.openai.api_server \
@@ -311,7 +323,8 @@ docker run --detach \
     --port "${SIDECAR_PORT}" \
     --host 0.0.0.0 \
     --download-dir /workspace/.cache/huggingface \
-    "${NVFP4_VLLM_ARGS[@]}"
+    "${NVFP4_VLLM_ARGS[@]}" \
+    "${_VLLM_EAGER_ARGS[@]}"
 
 # Aggressive page-cache dropper while vLLM loads (background, stops when health OK)
 echo "Starting 3s page-cache dropper during vLLM load..."
@@ -327,7 +340,7 @@ _dropper_pid=$!
 
 # ── STEP 5: Wait for vLLM health (live log stream) ───────────────────────────
 _VLLM_HEALTH_URL="http://localhost:${SIDECAR_PORT}/health"
-_VLLM_TIMEOUT=900   # 15 minutes
+_VLLM_TIMEOUT=2700  # 45 min — FP8 eager≈10 min; compiled (VLLM_ENFORCE_EAGER=0) takes 23+ min
 echo "Streaming vLLM sidecar logs (waiting for health at ${_VLLM_HEALTH_URL})..."
 docker logs -f nemotron-vllm-sidecar 2>&1 &
 _vllm_log_pid=$!

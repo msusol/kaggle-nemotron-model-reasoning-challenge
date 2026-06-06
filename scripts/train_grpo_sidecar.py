@@ -340,7 +340,7 @@ def main():
     # ── Wait for vLLM sidecar (orchestrator starts it after this process
     #    writes .trainer_model_ready, then writes .vllm_sidecar_ready) ────────
     import time, openai, requests as _req
-    _vllm_wait_timeout = 1200  # 20 minutes
+    _vllm_wait_timeout = 2700  # 45 min — FP8 eager≈10 min; compiled (VLLM_ENFORCE_EAGER=0) takes 23+ min
     _vllm_wait_start   = time.monotonic()
     _vllm_health_url   = f"{args.vllm_server_url}/health"
 

@@ -216,33 +216,17 @@ def main():
     total = sum(p.numel() for p in model.parameters())
     print(f"Trainable: {trainable:,} / Total: {total:,}", flush=True)
 
-    # ── override sequence-length caps before Unsloth tokenizes ──────────────────
-    # Unsloth caps max_seq_length to the smallest of: tokenizer.model_max_length,
-    # model.config.max_position_embeddings, and several other aliases. For Nemotron-H
-    # (Mamba architecture) these are all set to 2048 by default. Override ALL of them
-    # before the dataset is tokenized so full 8192-token traces are preserved.
-    try:
-        _base_cfg = model.base_model.model.config
-    except AttributeError:
-        _base_cfg = model.config
-
-    # Model config — check every alias Unsloth might read
-    _cfg_attrs = ("max_position_embeddings", "max_seq_length", "max_seqlen",
-                  "seq_length", "max_sequence_length")
-    for _attr in _cfg_attrs:
-        _val = getattr(_base_cfg, _attr, None)
-        if _val is not None:
-            print(f"  model.config.{_attr} = {_val}", flush=True)
-            if _val < args.max_seq_length:
-                setattr(_base_cfg, _attr, args.max_seq_length)
-                print(f"  → overrode to {args.max_seq_length}", flush=True)
-
-    # Tokenizer model_max_length — the primary value Unsloth reads
-    _tok_max = getattr(tokenizer, "model_max_length", None)
-    print(f"  tokenizer.model_max_length = {_tok_max}", flush=True)
-    if _tok_max is not None and _tok_max < args.max_seq_length:
-        tokenizer.model_max_length = args.max_seq_length
-        print(f"  → overrode tokenizer.model_max_length to {args.max_seq_length}", flush=True)
+    # ── override model.max_seq_length before Unsloth tokenizes ─────────────────
+    # Unsloth injects a check into SFTTrainer.__init__ that reads getattr(model,
+    # 'max_seq_length', None) and caps args.max_seq_length to that value.
+    # For NemotronH, Unsloth's own patching sets model.max_seq_length = 2048
+    # (a conservative hardcode — the actual model supports 262144 context).
+    # Override the attribute directly before trainer creation.
+    _unsloth_cap = getattr(model, "max_seq_length", None)
+    print(f"  model.max_seq_length (Unsloth) = {_unsloth_cap}", flush=True)
+    if _unsloth_cap is not None and _unsloth_cap < args.max_seq_length:
+        model.max_seq_length = args.max_seq_length
+        print(f"  → overrode model.max_seq_length to {args.max_seq_length}", flush=True)
 
     # ── load dataset ────────────────────────────────────────────────────────────
     print(f"Loading dataset: {args.train_file}", flush=True)

@@ -123,6 +123,7 @@ See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full 
 │   ├── nemotron_submission_demo.ipynb           # submission path 2: load adapter → /kaggle/working
 │   ├── submission-demo-kernel-metadata.json     # push config for submission demo
 │   └── scrapbook.ipynb
+├── start_jupyter.sh             # start JupyterLab in a tmux session (port 8888)
 └── scripts/
     ├── build_image.sh               # builds Docker image (26.04 primary)
     ├── load_config.sh               # exports configs/nemotron.yaml as env vars
@@ -301,6 +302,25 @@ source .env && kaggle competitions submit \
   -f output/submission/submission.zip \
   -m "v0.4 huikang corpus lr=2e-4 seq=8192"
 ```
+
+### Jupyter Server
+
+JupyterLab runs on port **8888** and is accessible from any machine on the local network.
+
+```bash
+# Start (no-ops if already running)
+bash start_jupyter.sh
+# → http://192.168.68.54:8888  (password: jupyter)
+
+# Attach to the tmux session to watch logs
+tmux attach -t jupyter
+
+# Stop
+tmux kill-session -t jupyter
+```
+
+Config is at `~/.jupyter/jupyter_server_config.py`. The server root is the project directory.
+The session is persistent across SSH disconnects via tmux.
 
 ### Kaggle Notebooks
 

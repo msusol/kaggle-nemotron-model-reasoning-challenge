@@ -42,9 +42,12 @@ if [[ -f "${WORKSPACE}/.env" ]]; then
 fi
 
 # ── Config ──────────────────────────────────────────────────────────────────
-SIDECAR_MODEL="${SIDECAR_MODEL:-NVFP4}"   # NVFP4 ~25 GB (27 GB headroom); FP8 ~37 GB (10 GB headroom)
+SIDECAR_MODEL="${SIDECAR_MODEL:-NVFP4}"     # FP8 ~37 GB; NVFP4 ~25 GB (needs cutlass-dsl smoke test)
 SIDECAR_PORT="${SIDECAR_PORT:-8000}"
 ROLLOUT_SYNC_STEPS="${ROLLOUT_SYNC_STEPS:-50}"
+NUM_STEPS="${NUM_STEPS:-500}"
+NUM_GENERATIONS="${NUM_GENERATIONS:-4}"
+MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-512}"
 VLLM_ALREADY_UP="${VLLM_ALREADY_UP:-0}"  # set to 1 to reuse a running vLLM on trainer retry
 RUN_NAME="${RUN_NAME:-grpo_v10_$(date +%Y%m%d_%H%M%S)}"
 ADAPTER_OUT="/workspace/output/adapter_${RUN_NAME}"
@@ -59,12 +62,13 @@ rm -f "${TRAINER_READY_FLAG}" "${VLLM_READY_FLAG}"
 case "${SIDECAR_MODEL}" in
   NVFP4)
     VLLM_MODEL_ID="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4"
-    VLLM_GPU_MEM_UTIL="0.20"
+    VLLM_GPU_MEM_UTIL="0.25"
     NVFP4_ENV=(-e VLLM_USE_FLASHINFER_MOE_FP4=1 -e VLLM_FLASHINFER_MOE_BACKEND=throughput)
     ;;
   FP8|*)
     VLLM_MODEL_ID="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8"
-    VLLM_GPU_MEM_UTIL="0.30"
+    # Trainer steady-state ≈ 71 GB → ~50 GB free. 0.35×121.69=42.6 GB (model 32 GB + 10.6 GB KV cache).
+    VLLM_GPU_MEM_UTIL="0.35"
     NVFP4_ENV=()
     ;;
 esac
@@ -191,7 +195,7 @@ echo "Starting training container (BF16 model load — this takes ~5-10 min)..."
 docker run --detach \
   --name "nemotron-grpo-${RUN_NAME}" \
   --privileged \
-  --oom-score-adj 300 \
+  --oom-score-adj 500 \
   -e NVIDIA_VISIBLE_DEVICES=all \
   --network=host \
   --ipc=host \
@@ -269,7 +273,7 @@ docker run --rm --privileged -v /:/host alpine sh -c \
   2>/dev/null || true
 
 # ── STEP 4: Start vLLM sidecar with aggressive page-cache dropper ─────────────
-# NVFP4 load peak: 83 GB (trainer stable) + ~12 GB (page cache, 3s dropper) + 20 GB (CUDA) ≈ 115 GB
+# NVFP4 load peak: 71 GB (trainer stable) + ~12 GB (page cache, 3s dropper) + 25 GB (model) ≈ 108 GB
 # A background Alpine dropper every 3s keeps page cache from accumulating.
 echo ""
 echo "Starting vLLM sidecar (${SIDECAR_MODEL} → ${VLLM_MODEL_ID}, gpu_util=${VLLM_GPU_MEM_UTIL})..."
@@ -277,7 +281,7 @@ docker run --detach \
   --name "nemotron-vllm-sidecar" \
   --privileged \
   -e NVIDIA_VISIBLE_DEVICES=all \
-  --oom-score-adj 200 \
+  --oom-score-adj -300 \
   --network=host \
   --ipc=host \
   --ulimit memlock=-1 \
@@ -313,24 +317,26 @@ _dropper_pid=""
 ) &
 _dropper_pid=$!
 
-# ── STEP 5: Wait for vLLM health ─────────────────────────────────────────────
+# ── STEP 5: Wait for vLLM health (live log stream) ───────────────────────────
 _VLLM_HEALTH_URL="http://localhost:${SIDECAR_PORT}/health"
 _VLLM_TIMEOUT=900   # 15 minutes
+echo "Streaming vLLM sidecar logs (waiting for health at ${_VLLM_HEALTH_URL})..."
+docker logs -f nemotron-vllm-sidecar 2>&1 &
+_vllm_log_pid=$!
+
 _ELAPSED=0
-echo "Waiting for vLLM health check at ${_VLLM_HEALTH_URL}..."
 until curl -sf "${_VLLM_HEALTH_URL}" >/dev/null 2>&1; do
   if [[ ${_ELAPSED} -ge ${_VLLM_TIMEOUT} ]]; then
+    kill "${_vllm_log_pid}" 2>/dev/null || true
     kill "${_dropper_pid}" 2>/dev/null || true
     echo "ERROR: vLLM sidecar did not become healthy within ${_VLLM_TIMEOUT}s" >&2
     docker logs --tail 50 nemotron-vllm-sidecar >&2 || true
     exit 1
   fi
-  if (( _ELAPSED % 30 == 0 )); then
-    echo "  [${_ELAPSED}s] vLLM still loading..."
-  fi
   sleep 15
   _ELAPSED=$(( _ELAPSED + 15 ))
 done
+kill "${_vllm_log_pid}" 2>/dev/null || true
 kill "${_dropper_pid}" 2>/dev/null || true
 echo "vLLM sidecar healthy (${_ELAPSED}s)"
 

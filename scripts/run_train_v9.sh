@@ -15,6 +15,7 @@ if [[ -f "${WORKSPACE}/.env" ]]; then
 fi
 
 RUN_NAME="${RUN_NAME:-v9_$(date +%Y%m%d_%H%M%S)}"
+MAX_SEQ_LENGTH="${MAX_SEQ_LENGTH:-2048}"
 ADAPTER_OUT="/workspace/output/adapter_${RUN_NAME}"
 LOG_FILE="${WORKSPACE}/output/train_${RUN_NAME}.log"
 mkdir -p "${WORKSPACE}/output"
@@ -102,11 +103,24 @@ docker run --rm --privileged -v /:/host alpine sh -c \
    && swapoff /host/swap.img 2>/dev/null; swapon /host/swap.img 2>/dev/null; true' \
   2>/dev/null || true
 
+# ── page-cache dropper during training ────────────────────────────────────────
+# Drops page cache every 30s to prevent accumulated file cache from triggering
+# OOM when PyTorch's allocator peaks during backward passes.
+(while true; do
+  docker run --rm --privileged -v /:/host alpine sh -c \
+    'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null || true
+  sleep 30
+done) &
+_dropper_pid=$!
+
 # ── run training ───────────────────────────────────────────────────────────────
+# --oom-score-adj -300: protect the trainer from OOM killer (same as GRPO trainer).
+# Previous value of 300 caused the container to be killed at step ~2 despite the
+# actual OOM trigger being recoverable page cache, not model memory.
 set +e
 ionice -c 2 -n 7 docker run --privileged \
   --name "nemotron-trainer-v9" \
-  --oom-score-adj 300 \
+  --oom-score-adj -300 \
   -e NVIDIA_VISIBLE_DEVICES=all \
   --ipc=host \
   --ulimit memlock=-1 \
@@ -128,7 +142,7 @@ ionice -c 2 -n 7 docker run --privileged \
     --model-id       nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 \
     --max-steps      1000 \
     --learning-rate  2e-4 \
-    --max-seq-length 7680 \
+    --max-seq-length "${MAX_SEQ_LENGTH}" \
     --batch-size     1 \
     --grad-accum     16 \
     --lora-r         32 \
@@ -137,6 +151,7 @@ ionice -c 2 -n 7 docker run --privileged \
   2>&1 | tee "${LOG_FILE}"
 TRAIN_EXIT=${PIPESTATUS[0]}
 set -e
+kill "${_dropper_pid}" 2>/dev/null || true
 
 # ── restore VM defaults ────────────────────────────────────────────────────────
 docker run --rm --privileged alpine sh -c \

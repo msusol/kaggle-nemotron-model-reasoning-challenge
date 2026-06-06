@@ -222,27 +222,22 @@ Init from v0.5-sft-unsloth (0.60 Kaggle). Two-container approach validated by mi
 Flag files `.trainer_model_ready` / `.vllm_sidecar_ready` coordinate the sequence.
 
 ### Infrastructure
-- [ ] Rebuild `nemotron-vllm-gb10:latest` — adds `peft`, optional NVFP4 flashinfer deps
-  ```bash
-  docker build \
-    --platform linux/arm64 \
-    -t nemotron-vllm-gb10:latest \
-    -f Dockerfile.vllm-gb10 \
-    .
-  ```
-- [ ] Confirm FP8 model is cached at `.cache/huggingface/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-FP8/`
-  (if not: `python -c "from huggingface_hub import snapshot_download; snapshot_download('nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8')"`)
+- [x] Rebuild `nemotron-vllm-gb10:latest` — vLLM 0.22.1, flashinfer 0.6.11.post2, peft, cutlass-dsl (2026-06-06)
+- [x] Create GRPO warmstart adapter — ran `remap_sft_adapter_for_grpo.py` → `output/adapter_v5_sft_grpo_warmstart/` (232 keys, 55.5 MB)
+- [x] FP8 model cached — `.cache/huggingface/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-FP8/` (38 files, 31 GB, 2026-06-06)
+- [ ] Cache NVFP4 model — `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4` (~25 GB, needed for default NVFP4 path)
 
 ### Smoke test (run before full training)
+- [ ] Smoke test NVFP4 path: verify cutlass-dsl loads, `SIDECAR_MODEL=NVFP4` reaches vLLM health 200
 - [ ] Run 10-step smoke test in tmux:
   ```bash
   tmux new -s grpo_smoke
   RUN_NAME=grpo_v10_smoke \
   ROLLOUT_SYNC_STEPS=5 \
-    bash scripts/run_grpo_sidecar.sh \
-      --num-steps 10 \
-      --num-generations 4 \
-      --max-new-tokens 128
+  NUM_STEPS=10 \
+  NUM_GENERATIONS=4 \
+  MAX_NEW_TOKENS=128 \
+    bash scripts/run_grpo_sidecar.sh
   ```
 - [ ] Verify startup sequence: trainer loads first, `.trainer_model_ready` written, then vLLM starts
 - [ ] Verify vLLM health 200 and initial LoRA load HTTP 200

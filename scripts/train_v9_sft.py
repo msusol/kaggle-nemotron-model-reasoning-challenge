@@ -216,6 +216,20 @@ def main():
     total = sum(p.numel() for p in model.parameters())
     print(f"Trainable: {trainable:,} / Total: {total:,}", flush=True)
 
+    # ── override max_position_embeddings ────────────────────────────────────────
+    # Unsloth reads model.config.max_position_embeddings and silently caps
+    # max_seq_length to that value. Nemotron-H (Mamba architecture) has this set
+    # to 2048 by default even though the architecture supports arbitrary length.
+    # Override before dataset tokenization to allow full 8192-token traces.
+    try:
+        _base_cfg = model.base_model.model.config
+    except AttributeError:
+        _base_cfg = model.config
+    _reported = getattr(_base_cfg, "max_position_embeddings", None)
+    if _reported is not None and _reported < args.max_seq_length:
+        _base_cfg.max_position_embeddings = args.max_seq_length
+        print(f"Overrode max_position_embeddings: {_reported} → {args.max_seq_length}", flush=True)
+
     # ── load dataset ────────────────────────────────────────────────────────────
     print(f"Loading dataset: {args.train_file}", flush=True)
     records = []

@@ -85,6 +85,8 @@ See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full 
 │   ├── test.csv             # competition test prompts (held-out) — committed
 │   ├── v0.4_train.jsonl     # 15,159 examples — huikang corpus (gitignored; run run_extract_corpus.sh)
 │   ├── v0.4_valid.jsonl     # 820 examples   — huikang corpus validation split (gitignored)
+│   ├── v0.9_train.jsonl     # ~18,603 examples — Format 4, 14 categories (gitignored; run prepare_v09_data.py)
+│   ├── v0.9_valid.jsonl     # ~979 examples  — v0.9 validation split (gitignored)
 │   ├── nemo_train.jsonl     # 15,159 examples — NeMo-format (gitignored; or download from Kaggle)
 │   ├── nemo_valid.jsonl     # 820 examples   — NeMo-format validation split (gitignored)
 │   └── nemo_dataset/        # Kaggle dataset card (README.md + dataset-metadata.json — committed)
@@ -118,6 +120,7 @@ See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full 
 │       ├── CITATIONS.md
 │       └── ...                          # submission-*, hybrid-mamba-*, archive/
 ├── notebook/
+│   ├── v09_data_prep.ipynb              # v0.9 data prep — 14-category proof, before/after conversion, stats
 │   ├── nemotron_v05_sft_unsloth.ipynb   # public prize eligibility writeup
 │   ├── kernel-metadata.json                     # push config for prize notebook
 │   ├── nemotron_submission_demo.ipynb           # submission path 2: load adapter → /kaggle/working
@@ -151,6 +154,9 @@ See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full 
     ├── run_inference.sh             # runner: inference (tees log to output/inference_*.log)
     ├── run_validate.sh
     ├── run_vllm.sh                  # start vLLM OpenAI-compatible server (nemotron-vllm-gb10)
+    ├── prepare_v09_data.py          # build data/v0.9_train.jsonl + v0.9_valid.jsonl (Format 4, 14 categories)
+    ├── train_v9_sft.py              # v0.9 SFT from base model, max_seq_length=8192, 1000 steps
+    ├── run_train_v9.sh              # Docker runner for v0.9 SFT
     └── services.sh                  # pause/resume non-training containers around a training run
 ```
 
@@ -294,7 +300,26 @@ bash scripts/package_submission.sh output/adapter_cot_vX_YYYYMMDD_HHMMSS output/
 # → output/submission/submission.zip
 ```
 
-### 7. Submit to Kaggle
+### 7. v0.9 training (Format 4, 14 categories, base model)
+
+Generate the v0.9 dataset from huikang + kishanvavdara, then run SFT:
+
+```bash
+# Build v0.9_train.jsonl + v0.9_valid.jsonl (18,603 + 979 examples, Format 4, 14 categories)
+python scripts/prepare_v09_data.py \
+  --huikang   data/v0.4_train.jsonl \
+  --kv-csv    ~/.cache/kagglehub/datasets/kishanvavdara/nemotron-reasoning-traj/versions/1/nemotron_traj.csv \
+  --out-train data/v0.9_train.jsonl \
+  --out-valid data/v0.9_valid.jsonl
+
+# SFT training — run inside tmux
+tmux new -s train_v9
+RUN_NAME=v9_sft bash scripts/run_train_v9.sh
+# → output/train_v9_sft_YYYYMMDD_HHMMSS.log
+# → output/adapter_v9_sft_YYYYMMDD_HHMMSS/
+```
+
+### 8. Submit to Kaggle
 
 ```bash
 source .env && kaggle competitions submit \

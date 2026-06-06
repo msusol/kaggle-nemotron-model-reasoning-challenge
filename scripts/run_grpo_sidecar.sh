@@ -214,13 +214,13 @@ docker run --detach \
   python scripts/train_grpo_sidecar.py \
     --adapter-dir        /workspace/output/adapter_v5_sft_unsloth \
     --grpo-warmstart     /workspace/output/adapter_v5_sft_grpo_warmstart \
-    --train-file         /workspace/data/train.csv \
+    --train-file         /workspace/data/v0.9_train.jsonl \
     --output-dir         "${ADAPTER_OUT}" \
     --vllm-server-url    "http://localhost:${SIDECAR_PORT}" \
     --rollout-sync-steps "${ROLLOUT_SYNC_STEPS}" \
-    --num-steps          500 \
-    --num-generations    4 \
-    --max-new-tokens     512 \
+    --num-steps          "${NUM_STEPS}" \
+    --num-generations    "${NUM_GENERATIONS}" \
+    --max-new-tokens     "${MAX_NEW_TOKENS}" \
     --kl-coeff           0.04 \
     --batch-size         1 \
     --seed               3407 \

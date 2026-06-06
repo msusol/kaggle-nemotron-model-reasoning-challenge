@@ -1,6 +1,6 @@
 base_model: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
 init_adapter: output/adapter_huikang_v4r3_20260602_142413
-train_file: data/v0.4_train.jsonl
+train_file: data/v0.9_train.jsonl
 output_dir: output/adapter
 
 # LoRA — must match init adapter's parameter space

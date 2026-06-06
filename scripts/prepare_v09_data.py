@@ -119,8 +119,10 @@ def parse_args():
                     help="Path to nemotron_traj.csv. Auto-downloaded if omitted.")
     ap.add_argument("--out-train", default="data/v0.9_train.jsonl")
     ap.add_argument("--out-valid", default="data/v0.9_valid.jsonl")
-    ap.add_argument("--valid-frac", type=float, default=0.05)
-    ap.add_argument("--seed",       type=int,   default=42)
+    ap.add_argument("--valid-frac",   type=float, default=0.05)
+    ap.add_argument("--cap-per-cat",  type=int,   default=1500,
+                    help="Max examples per category in train split (0 = no cap).")
+    ap.add_argument("--seed",         type=int,   default=42)
     return ap.parse_args()
 
 
@@ -166,11 +168,23 @@ def main():
     for cat, examples in sorted(by_cat.items()):
         n_v = max(1, int(len(examples) * args.valid_frac))
         valid_set.extend(examples[:n_v])
-        train_set.extend(examples[n_v:])
+        cat_train = examples[n_v:]
+        if args.cap_per_cat > 0 and len(cat_train) > args.cap_per_cat:
+            cat_train = cat_train[: args.cap_per_cat]
+        train_set.extend(cat_train)
 
     rng.shuffle(train_set)
     rng.shuffle(valid_set)
-    print(f"Stratified split: {len(train_set):,} train / {len(valid_set):,} valid")
+
+    # Per-category report
+    from collections import Counter as _Counter
+    tr_counts = _Counter(ex["category"] for ex in train_set)
+    print(f"Stratified split (cap={args.cap_per_cat}): {len(train_set):,} train / {len(valid_set):,} valid")
+    for cat in sorted(tr_counts.keys()):
+        orig = len(by_cat[cat]) - max(1, int(len(by_cat[cat]) * args.valid_frac))
+        capped = tr_counts[cat]
+        flag = f"  <- capped from {orig}" if capped < orig else ""
+        print(f"  {cat:<30} {capped:>5}{flag}")
 
     Path(args.out_train).parent.mkdir(parents=True, exist_ok=True)
     with open(args.out_train, "w", encoding="utf-8") as f:

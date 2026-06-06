@@ -219,12 +219,14 @@ def main():
     # ── load dataset ────────────────────────────────────────────────────────────
     print(f"Loading dataset: {args.train_file}", flush=True)
     records = []
-    buckets = []
+    strat_labels = []
     with open(args.train_file, encoding="utf-8") as f:
         for line in f:
             r = json.loads(line)
             records.append({"messages": r["messages"]})
-            buckets.append(r.get("bucket", "other"))
+            # stratify by category (14 groups) rather than bucket (6 groups) so each
+            # gradient-accumulation window sees all categories proportionally
+            strat_labels.append(r.get("category") or r.get("bucket", "other"))
 
     dataset = Dataset.from_list(records)
     print(f"Dataset: {len(dataset)} examples", flush=True)
@@ -297,8 +299,9 @@ def main():
             )
 
     eff_bs = args.batch_size * args.grad_accum
-    strat_order = build_stratified_order(buckets, eff_bs, args.seed)
-    print(f"Effective batch: {eff_bs}, stratified order built", flush=True)
+    strat_order = build_stratified_order(strat_labels, eff_bs, args.seed)
+    n_labels = len(set(strat_labels))
+    print(f"Effective batch: {eff_bs}, stratified over {n_labels} categories", flush=True)
 
     # ── training config ─────────────────────────────────────────────────────────
     training_args = SFTConfig(

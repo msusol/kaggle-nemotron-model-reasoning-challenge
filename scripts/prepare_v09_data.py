@@ -152,12 +152,25 @@ def main():
     all_examples = huikang_examples + kv_examples
     print(f"Total: {len(all_examples):,}")
 
+    # Stratified split by category — guarantees proportional valid coverage per category
+    # and a floor of 1 valid example for categories with very few total examples.
+    from collections import defaultdict as _dd
     rng = random.Random(args.seed)
-    rng.shuffle(all_examples)
+    by_cat = _dd(list)
+    for ex in all_examples:
+        by_cat[ex["category"]].append(ex)
+    for v in by_cat.values():
+        rng.shuffle(v)
 
-    n_valid   = max(1, int(len(all_examples) * args.valid_frac))
-    valid_set = all_examples[:n_valid]
-    train_set = all_examples[n_valid:]
+    valid_set, train_set = [], []
+    for cat, examples in sorted(by_cat.items()):
+        n_v = max(1, int(len(examples) * args.valid_frac))
+        valid_set.extend(examples[:n_v])
+        train_set.extend(examples[n_v:])
+
+    rng.shuffle(train_set)
+    rng.shuffle(valid_set)
+    print(f"Stratified split: {len(train_set):,} train / {len(valid_set):,} valid")
 
     Path(args.out_train).parent.mkdir(parents=True, exist_ok=True)
     with open(args.out_train, "w", encoding="utf-8") as f:

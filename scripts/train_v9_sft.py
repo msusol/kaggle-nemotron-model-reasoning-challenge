@@ -10,6 +10,11 @@ Usage (via run_train_v9.sh):
         --output-dir /workspace/output/adapter_v9_YYYYMMDD_HHMMSS
 """
 
+try:
+    import unsloth  # must precede trl/transformers/peft to apply all optimizations
+except ImportError:
+    pass
+
 import argparse
 import sys
 import threading

@@ -192,48 +192,48 @@ else
 fi
 
 # ── STEP 1: Start training container first ───────────────────────────────────
-# The BF16 training model load peaks at ~126 GB (model + page cache sharing the
-# same unified pool). The container's dropper thread manages this safely.
-# We start it detached so we can poll the ready flag and launch vLLM in parallel.
-echo ""
-echo "Starting training container (BF16 model load — this takes ~5-10 min)..."
-docker run --detach \
-  --name "nemotron-grpo-${RUN_NAME}" \
-  --privileged \
-  --oom-score-adj 500 \
-  -e NVIDIA_VISIBLE_DEVICES=all \
-  --network=host \
-  --ipc=host \
-  --ulimit memlock=-1 \
-  --ulimit stack=67108864 \
-  -e HF_TOKEN="${HF_TOKEN:?HF_TOKEN is not set}" \
-  -e HF_HUB_OFFLINE=1 \
-  -e TRANSFORMERS_OFFLINE=1 \
-  -e HF_DATASETS_OFFLINE=1 \
-  -e PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512" \
-  -v "${WORKSPACE}":/workspace \
-  -v "${WORKSPACE}/.cache/huggingface":/home/ubuntu/.cache/huggingface \
-  -v "${WORKSPACE}/.cache/triton":/home/ubuntu/.triton \
-  -w /workspace \
-  nemotron-gb10:latest \
-  python scripts/train_grpo_sidecar.py \
-    --adapter-dir        /workspace/output/adapter_v5_sft_unsloth \
-    --grpo-warmstart     /workspace/output/adapter_v5_sft_grpo_warmstart \
-    --train-file         /workspace/data/v0.9_train.jsonl \
-    --output-dir         "${ADAPTER_OUT}" \
-    --vllm-server-url    "http://localhost:${SIDECAR_PORT}" \
-    --rollout-sync-steps "${ROLLOUT_SYNC_STEPS}" \
-    --num-steps          "${NUM_STEPS}" \
-    --num-generations    "${NUM_GENERATIONS}" \
-    --max-new-tokens     "${MAX_NEW_TOKENS}" \
-    --kl-coeff           0.04 \
-    --batch-size         1 \
-    --seed               3407 \
-  > "${LOG_FILE}" 2>&1 &
-TRAINER_BG_PID=$!
-
-echo "Training container started (BG pid ${TRAINER_BG_PID})."
-echo "Tailing log in background — watch: tail -f ${LOG_FILE}"
+if [[ "${VLLM_ALREADY_UP}" != "1" ]]; then
+  echo ""
+  echo "Starting training container (BF16 model load — this takes ~5-10 min)..."
+  docker run --detach \
+    --name "nemotron-grpo-${RUN_NAME}" \
+    --privileged \
+    --oom-score-adj 500 \
+    -e NVIDIA_VISIBLE_DEVICES=all \
+    --network=host \
+    --ipc=host \
+    --ulimit memlock=-1 \
+    --ulimit stack=67108864 \
+    -e HF_TOKEN="${HF_TOKEN:?HF_TOKEN is not set}" \
+    -e HF_HUB_OFFLINE=1 \
+    -e TRANSFORMERS_OFFLINE=1 \
+    -e HF_DATASETS_OFFLINE=1 \
+    -e PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512" \
+    -v "${WORKSPACE}":/workspace \
+    -v "${WORKSPACE}/.cache/huggingface":/home/ubuntu/.cache/huggingface \
+    -v "${WORKSPACE}/.cache/triton":/home/ubuntu/.triton \
+    -w /workspace \
+    nemotron-gb10:latest \
+    python scripts/train_grpo_sidecar.py \
+      --adapter-dir        /workspace/output/adapter_v5_sft_unsloth \
+      --grpo-warmstart     /workspace/output/adapter_v5_sft_grpo_warmstart \
+      --train-file         /workspace/data/v0.9_train.jsonl \
+      --output-dir         "${ADAPTER_OUT}" \
+      --vllm-server-url    "http://localhost:${SIDECAR_PORT}" \
+      --rollout-sync-steps "${ROLLOUT_SYNC_STEPS}" \
+      --num-steps          "${NUM_STEPS}" \
+      --num-generations    "${NUM_GENERATIONS}" \
+      --max-new-tokens     "${MAX_NEW_TOKENS}" \
+      --kl-coeff           0.04 \
+      --batch-size         1 \
+      --seed               3407 \
+    > "${LOG_FILE}" 2>&1 &
+  TRAINER_BG_PID=$!
+  echo "Training container started (BG pid ${TRAINER_BG_PID})."
+  echo "Tailing log in background — watch: tail -f ${LOG_FILE}"
+else
+  echo "VLLM_ALREADY_UP=1 — reusing existing trainer container nemotron-grpo-${RUN_NAME}."
+fi
 
 # ── STEP 2: Wait for TRAINER_MODEL_READY flag ────────────────────────────────
 echo "Waiting for training model to load (flag: ${TRAINER_READY_FLAG})..."

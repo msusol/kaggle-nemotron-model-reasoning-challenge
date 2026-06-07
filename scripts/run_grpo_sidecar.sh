@@ -49,6 +49,11 @@ NUM_STEPS="${NUM_STEPS:-500}"
 NUM_GENERATIONS="${NUM_GENERATIONS:-4}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-512}"
 VLLM_ALREADY_UP="${VLLM_ALREADY_UP:-0}"  # set to 1 to reuse a running vLLM on trainer retry
+# vLLM sizing — the profile forward pass uses max_num_seqs × max_model_len tokens.
+# On GB10 (121 GB unified) with trainer at 61 GB + model at 32 GB, only ~28 GB is free for
+# activation spikes during profiling. Keep these small; production overrides via env vars.
+VLLM_MAX_NUM_SEQS="${VLLM_MAX_NUM_SEQS:-${NUM_GENERATIONS}}"   # default = generation group size
+VLLM_MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-4096}"                # smoke: 2048+512; prod set 8192
 # Adapter / data paths — override these env vars to switch from v5→v9 (or any future version)
 # without editing the script.
 SFT_ADAPTER="${SFT_ADAPTER:-/workspace/output/adapter_v5_sft_unsloth}"
@@ -323,8 +328,8 @@ docker run --detach \
     --enable-lora \
     --max-lora-rank 32 \
     --gpu-memory-utilization "${VLLM_GPU_MEM_UTIL}" \
-    --max-model-len 8192 \
-    --max-num-seqs 8 \
+    --max-model-len "${VLLM_MAX_MODEL_LEN}" \
+    --max-num-seqs "${VLLM_MAX_NUM_SEQS}" \
     --port "${SIDECAR_PORT}" \
     --host 0.0.0.0 \
     --download-dir /workspace/.cache/huggingface \

@@ -49,6 +49,11 @@ NUM_STEPS="${NUM_STEPS:-500}"
 NUM_GENERATIONS="${NUM_GENERATIONS:-4}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-512}"
 VLLM_ALREADY_UP="${VLLM_ALREADY_UP:-0}"  # set to 1 to reuse a running vLLM on trainer retry
+# LoRA in vLLM: disabled by default — Triton 3.6.0 on SM120 (GB10) cannot compile tl.dot with
+# fp8e4nv lhs (Punica LoRA kernel path), causing profile_run to crash.
+# For the smoke test (10 steps, ROLLOUT_SYNC_STEPS=50) this is fine: no LoRA sync occurs anyway.
+# Re-enable once Triton is upgraded or a patched Punica kernel is available.
+VLLM_ENABLE_LORA="${VLLM_ENABLE_LORA:-0}"
 # vLLM sizing — the profile forward pass uses max_num_seqs × max_model_len tokens.
 # On GB10 (121 GB unified) with trainer at 61 GB + model at 32 GB, only ~28 GB is free for
 # activation spikes during profiling. Keep these small; production overrides via env vars.
@@ -96,6 +101,11 @@ esac
 _VLLM_EAGER_ARGS=()
 if [[ "${VLLM_ENFORCE_EAGER}" == "1" ]]; then
   _VLLM_EAGER_ARGS=(--enforce-eager)
+fi
+
+_VLLM_LORA_ARGS=()
+if [[ "${VLLM_ENABLE_LORA}" == "1" ]]; then
+  _VLLM_LORA_ARGS=(--enable-lora --max-lora-rank 32)
 fi
 
 echo "RUN_NAME:        ${RUN_NAME}"
@@ -328,8 +338,7 @@ docker run --detach \
   python -m vllm.entrypoints.openai.api_server \
     --model "${VLLM_MODEL_ID}" \
     --dtype auto \
-    --enable-lora \
-    --max-lora-rank 32 \
+    "${_VLLM_LORA_ARGS[@]}" \
     --gpu-memory-utilization "${VLLM_GPU_MEM_UTIL}" \
     --max-model-len "${VLLM_MAX_MODEL_LEN}" \
     --max-num-seqs "${VLLM_MAX_NUM_SEQS}" \

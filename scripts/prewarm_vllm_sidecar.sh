@@ -78,8 +78,6 @@ docker run --detach \
   python -m vllm.entrypoints.openai.api_server \
     --model "${VLLM_MODEL_ID}" \
     --dtype auto \
-    --enable-lora \
-    --max-lora-rank 32 \
     --gpu-memory-utilization 0.80 \
     --max-model-len 8192 \
     --max-num-seqs 8 \

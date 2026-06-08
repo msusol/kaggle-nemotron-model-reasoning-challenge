@@ -1,0 +1,16 @@
+{
+  "id": "gdataranger/nemotron-v09-build",
+  "title": "Nemotron v09 Build",
+  "code_file": "v09_utility_script.py",
+  "language": "python",
+  "kernel_type": "script",
+  "keywords": ["utility script"],
+  "is_private": false,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

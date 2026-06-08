@@ -1,0 +1,23 @@
+{
+  "id": "gdataranger/nemotron-v0-9-sft-training-rtx-pro-6000",
+  "title": "Nemotron v0.9 SFT Training RTX Pro 6000",
+  "code_file": "v09_train_kaggle.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": false,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": false,
+  "dataset_sources": [
+    "gdataranger/nemotron-v09-training-data"
+  ],
+  "competition_sources": [
+    "nvidia-nemotron-model-reasoning-challenge"
+  ],
+  "kernel_sources": [
+    "gdataranger/nemotron-v09-build"
+  ],
+  "model_sources": [
+    "metric/nemotron-3-nano-30b-a3b-bf16/transformers/default/1"
+  ]
+}

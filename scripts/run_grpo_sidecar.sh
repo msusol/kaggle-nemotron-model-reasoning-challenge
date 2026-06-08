@@ -318,11 +318,11 @@ docker run --detach \
   -e HF_HOME=/workspace/.cache/huggingface \
   -e VLLM_TORCH_COMPILE_WORKERS=1 \
   -e MAX_JOBS=1 \
-  -e VLLM_ATTENTION_BACKEND=TRITON_ATTN \
   -e TRITON_CACHE_DIR=/workspace/.cache/triton \
   "${NVFP4_ENV[@]}" \
   -v "${WORKSPACE}":/workspace \
   -v "${WORKSPACE}/.cache/vllm_compile":/root/.cache/vllm \
+  -v "${WORKSPACE}/.cache/flashinfer":/root/.cache/flashinfer \
   -w /workspace \
   nemotron-vllm-gb10:latest \
   python -m vllm.entrypoints.openai.api_server \

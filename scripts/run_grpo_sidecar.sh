@@ -304,6 +304,7 @@ docker run --rm --privileged -v /:/host alpine sh -c \
 # A background Alpine dropper every 3s keeps page cache from accumulating.
 echo ""
 echo "Starting vLLM sidecar (${SIDECAR_MODEL} → ${VLLM_MODEL_ID}, gpu_util=${VLLM_GPU_MEM_UTIL})..."
+docker rm -f nemotron-vllm-sidecar 2>/dev/null || true
 docker run --detach \
   --name "nemotron-vllm-sidecar" \
   --privileged \
@@ -316,9 +317,11 @@ docker run --detach \
   -e HF_TOKEN="${HF_TOKEN}" \
   -e HF_HOME=/workspace/.cache/huggingface \
   -e VLLM_TORCH_COMPILE_WORKERS=1 \
+  -e MAX_JOBS=1 \
+  -e VLLM_ATTENTION_BACKEND=TRITON_ATTN \
+  -e TRITON_CACHE_DIR=/workspace/.cache/triton \
   "${NVFP4_ENV[@]}" \
   -v "${WORKSPACE}":/workspace \
-  -v "${WORKSPACE}/.cache/triton":/home/ubuntu/.triton \
   -v "${WORKSPACE}/.cache/vllm_compile":/root/.cache/vllm \
   -w /workspace \
   nemotron-vllm-gb10:latest \

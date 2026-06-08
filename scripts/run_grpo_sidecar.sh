@@ -54,11 +54,17 @@ VLLM_ALREADY_UP="${VLLM_ALREADY_UP:-0}"  # set to 1 to reuse a running vLLM on t
 # For the smoke test (10 steps, ROLLOUT_SYNC_STEPS=50) this is fine: no LoRA sync occurs anyway.
 # Re-enable once Triton is upgraded or a patched Punica kernel is available.
 VLLM_ENABLE_LORA="${VLLM_ENABLE_LORA:-0}"
-# vLLM sizing — the profile forward pass uses max_num_seqs × max_model_len tokens.
-# On GB10 (121 GB unified) with trainer at 61 GB + model at 32 GB, only ~28 GB is free for
-# activation spikes during profiling. Keep these small; production overrides via env vars.
-VLLM_MAX_NUM_SEQS="${VLLM_MAX_NUM_SEQS:-${NUM_GENERATIONS}}"   # default = generation group size
-VLLM_MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-4096}"                # smoke: 2048+512; prod set 8192
+# vLLM sizing — the profile forward pass allocates max_num_seqs × max_model_len tokens of
+# activation memory. On GB10 (121 GB unified) trainer (61 GB) + model (32 GB) + OS (8 GB)
+# leaves only ~20 GB for activation spikes. With max_num_seqs=4 × max_model_len=4096 the
+# FP8 MoE activation spike is ~14 GB — dangerously close to the limit and caused two hard
+# system hangs requiring reboot. Set both to the minimum needed for the workload.
+# max_num_seqs=1: vLLM processes one sequence at a time; fine for GRPO (sequential rollouts)
+# max_model_len=2560: 2048 prompt + 512 max_new_tokens; set to 8192 for long-CoT production
+# Profile pass with these values: 1 × 2560 = 2560 tokens → activation spike ~2 GB (safe).
+# Production: VLLM_MAX_NUM_SEQS=8 VLLM_MAX_MODEL_LEN=8192 bash scripts/run_grpo_sidecar.sh
+VLLM_MAX_NUM_SEQS="${VLLM_MAX_NUM_SEQS:-1}"
+VLLM_MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-2560}"
 # Adapter / data paths — override these env vars to switch from v5→v9 (or any future version)
 # without editing the script.
 SFT_ADAPTER="${SFT_ADAPTER:-/workspace/output/adapter_v5_sft_unsloth}"

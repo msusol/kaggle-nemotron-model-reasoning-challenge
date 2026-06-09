@@ -19,6 +19,7 @@ data/v0.5_train.jsonl
 data/v0.9_train.jsonl
 data/v0.9_valid.jsonl
 unsloth_compiled_cache/
+adapters/
 .paused_containers
 .idea/
 submission.zip

@@ -112,7 +112,8 @@ RUN uv venv \
  && uv pip install setuptools wheel packaging \
  && uv pip install -e ".[mcore]" \
     --no-build-isolation \
-    --extra-index-url https://pypi.ngc.nvidia.com
+    --extra-index-url https://pypi.ngc.nvidia.com \
+    --index-strategy unsafe-best-match
 
 # ── NeMo Gym — RL environments ────────────────────────────────────────────────
 RUN uv pip install nemo-gym

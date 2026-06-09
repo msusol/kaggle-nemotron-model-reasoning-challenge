@@ -143,3 +143,4 @@ Running this against the base model locally would confirm whether any standard `
 
 - ADR-0004 — gradient checkpointing bypass (separate NemotronH constraint)
 - `notebook/v09_train_kaggle.ipynb` — cell-lora (warmstart path), cell-save, submission zip cell
+- Kaggle discussion: https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/705393 — open question to peers on whether routed expert keys can be submitted in evaluator-compatible format

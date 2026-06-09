@@ -3,8 +3,11 @@
 #
 # Expected build time: 30–90 min (network + causal-conv1d / mamba-ssm source builds).
 #
-# MAX_JOBS=8 is critical — the GB10 has 72 ARM cores and cmake without a job cap
-# will OOM the host during causal-conv1d / mamba-ssm source builds.
+# MAX_JOBS=4 caps parallel cmake/nvcc processes. The GB10 has 72 ARM cores and
+# cmake without a job cap will OOM the host during CUDA extension source builds.
+#
+# --memory 100g caps the build container's cgroup so it is killed before the
+# OS runs out of its ~121 GB pool (kills build, not sshd/systemd).
 #
 # IMPORTANT: Always run inside tmux to survive SSH disconnects.
 #
@@ -22,11 +25,13 @@ MAX_JOBS="${MAX_JOBS:-4}"
 
 echo "Building ${IMAGE} from ${DOCKERFILE}"
 echo "MAX_JOBS=${MAX_JOBS}"
+echo "Memory cap: 100 GB (build container killed before OS if OOM)"
 echo ""
 
 docker build \
   -f "${DOCKERFILE}" \
   --build-arg MAX_JOBS="${MAX_JOBS}" \
+  --memory 100g \
   -t "${IMAGE}" \
   "${WORKSPACE}"
 

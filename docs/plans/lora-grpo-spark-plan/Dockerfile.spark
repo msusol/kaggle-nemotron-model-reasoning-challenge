@@ -13,10 +13,11 @@
 
 # ── Base image ────────────────────────────────────────────────────────────────
 # pytorch:26.04-py3 is the first PyTorch NGC image with full GB10/arm64 support.
-# Must use the aarch64 variant (selected automatically via --platform if needed).
-FROM nvcr.io/nvidia/pytorch:26.04-py3
+# --platform=linux/arm64: explicit targeting prevents BuildKit from pulling the
+# wrong variant when building on a mixed-arch host or via remote buildkitd.
+FROM --platform=linux/arm64 nvcr.io/nvidia/pytorch:26.04-py3
 
-ARG MAX_JOBS=8
+ARG MAX_JOBS=4
 
 # ── CUDA architecture list ────────────────────────────────────────────────────
 # Must include sm_120 (GB200) and sm_121 (GB10 DGX Spark).
@@ -30,8 +31,9 @@ ENV MAX_JOBS=${MAX_JOBS}
 # max_split_size_mb:512: prevents large blocks from being fragmented
 ENV PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512"
 
-# ── Disable pip version check (speeds up installs) ────────────────────────────
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+# ── Disable pip version check and caching ────────────────────────────────────
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
 
 # ── System dependencies ───────────────────────────────────────────────────────
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \

@@ -268,9 +268,8 @@ See `docs/plans/v0.11-lora-grpo-spark-plan.md`.
 Replaces v0.10 on DGX Spark — vLLM sidecar is infeasible (OOM); uses Megatron inference backend instead.
 
 ### Phase A — Build and validate environment
-- [ ] Build `nemo-rl-spark:latest` on DGX Spark (`docker build -f docs/plans/lora-grpo-spark-plan/Dockerfile.spark --build-arg MAX_JOBS=8 -t nemo-rl-spark:latest .`)
-- [ ] Run HBM preflight cleanup; verify ≥ 65 GB free
-- [ ] Verify GPU, packages, and nano-v3 branch inside container
+- [x] Build `nemo-rl-spark:latest` on DGX Spark — completed 2026-06-08
+- [x] Verify GPU inside container — `torch.cuda.get_device_name(0)` → `NVIDIA GB10` ✓
 
 ### Phase B — Data and model
 - [x] Run `python scripts/prepare_v11_data.py` → `data/v0.9_grpo_train.jsonl` (13,297) + `data/v0.9_grpo_valid.jsonl` (950) — NeMo Gym `{prompt, answer}` format; v0.9 data, all 16 categories

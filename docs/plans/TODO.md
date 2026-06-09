@@ -268,20 +268,23 @@ See `docs/plans/v0.11-lora-grpo-spark-plan.md`.
 Replaces v0.10 on DGX Spark — vLLM sidecar is infeasible (OOM); uses Megatron inference backend instead.
 
 ### Phase A — Build and validate environment
-- [ ] Build `nemo-rl-spark:latest` on DGX Spark (`docker build -f Dockerfile.spark --build-arg MAX_JOBS=8`)
+- [ ] Build `nemo-rl-spark:latest` on DGX Spark (`docker build -f docs/plans/lora-grpo-spark-plan/Dockerfile.spark --build-arg MAX_JOBS=8 -t nemo-rl-spark:latest .`)
 - [ ] Run HBM preflight cleanup; verify ≥ 65 GB free
 - [ ] Verify GPU, packages, and nano-v3 branch inside container
 
 ### Phase B — Data and model
-- [ ] Copy `data/v0.9_train.jsonl` + `data/v0.9_valid.jsonl` to Spark workspace
+- [x] Run `python scripts/prepare_v11_data.py` → `data/v0.9_grpo_train.jsonl` (13,297) + `data/v0.9_grpo_valid.jsonl` (950) — NeMo Gym `{prompt, answer}` format; v0.9 data, all 16 categories
+- [ ] Copy `data/v0.9_grpo_train.jsonl` + `data/v0.9_grpo_valid.jsonl` to Spark workspace
 - [ ] Confirm BF16 model cached at `/workspace/model/` (~60 GB, 13 safetensors)
 - [ ] Apply tokenizer chat template patch (`enable_thinking=false`)
 
 ### Phase C — Validation run
-- [ ] 3-step validation in tmux; confirm rollout completes, `mean_reward > 0`, HBM ≤ 125 GB
+- [ ] 3-step smoke test in tmux: `SMOKE_TEST=1 RUN_NAME=grpo_v11_smoke bash scripts/run_nemo_grpo_spark.sh`
+- [ ] Confirm rollout completes, `mean_reward > 0`, HBM ≤ 125 GB
 
 ### Phase D — Full training run
-- [ ] Full GRPO run in tmux (200–500 steps); monitor reward trend and HBM
+- [ ] Full GRPO run in tmux: `RUN_NAME=grpo_v11 bash scripts/run_nemo_grpo_spark.sh`
+- [ ] Monitor reward trend and HBM; resume with `RESUME=1` if interrupted
 
 ### Phase E — Export and submit
 - [ ] Export best checkpoint via `convert_lora_to_hf.py` → `/workspace/results/v0.11-merged-hf`
@@ -304,11 +307,10 @@ Replaces v0.10 on DGX Spark — vLLM sidecar is infeasible (OOM); uses Megatron 
 6. Validate and submit
 
 ### v0.11-lora-grpo-spark-plan.md
-1. Build `nemo-rl-spark:latest` on DGX Spark (Dockerfile.spark, `--build-arg MAX_JOBS=8`)
-2. Run HBM preflight + 3-step validation run
-3. Resolve open questions: NeMo Gym reward for competition data, warmstart HF→Megatron conversion
-4. Full GRPO training run (200–500 steps) in tmux
-5. Export via `convert_lora_to_hf.py`; validate and submit
+1. Build `nemo-rl-spark:latest` on DGX Spark (`docker build -f docs/plans/lora-grpo-spark-plan/Dockerfile.spark --build-arg MAX_JOBS=8 -t nemo-rl-spark:latest .`)
+2. Run HBM preflight + smoke test: `SMOKE_TEST=1 RUN_NAME=grpo_v11_smoke bash scripts/run_nemo_grpo_spark.sh`
+3. Full GRPO run: `RUN_NAME=grpo_v11 bash scripts/run_nemo_grpo_spark.sh`
+4. Export via `convert_lora_to_hf.py`; validate and submit
 
 ## Infrastructure (complete)
 - [x] `Dockerfile.gb10` (26.04) — current primary image for all training runs

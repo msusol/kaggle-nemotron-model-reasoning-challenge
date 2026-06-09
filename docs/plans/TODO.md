@@ -262,6 +262,33 @@ Flag files `.trainer_model_ready` / `.vllm_sidecar_ready` coordinate the sequenc
   ```
 - [ ] Validate, package, submit; update leaderboard
 
+## Phase 8 — v0.11 LoRA GRPO on DGX Spark (NeMo RL + Megatron backend)
+
+See `docs/plans/v0.11-lora-grpo-spark-plan.md`.
+Replaces v0.10 on DGX Spark — vLLM sidecar is infeasible (OOM); uses Megatron inference backend instead.
+
+### Phase A — Build and validate environment
+- [ ] Build `nemo-rl-spark:latest` on DGX Spark (`docker build -f Dockerfile.spark --build-arg MAX_JOBS=8`)
+- [ ] Run HBM preflight cleanup; verify ≥ 65 GB free
+- [ ] Verify GPU, packages, and nano-v3 branch inside container
+
+### Phase B — Data and model
+- [ ] Copy `data/v0.9_train.jsonl` + `data/v0.9_valid.jsonl` to Spark workspace
+- [ ] Confirm BF16 model cached at `/workspace/model/` (~60 GB, 13 safetensors)
+- [ ] Apply tokenizer chat template patch (`enable_thinking=false`)
+
+### Phase C — Validation run
+- [ ] 3-step validation in tmux; confirm rollout completes, `mean_reward > 0`, HBM ≤ 125 GB
+
+### Phase D — Full training run
+- [ ] Full GRPO run in tmux (200–500 steps); monitor reward trend and HBM
+
+### Phase E — Export and submit
+- [ ] Export best checkpoint via `convert_lora_to_hf.py` → `/workspace/results/v0.11-merged-hf`
+- [ ] Verify exported model generates correct boxed answers on 10 validation examples
+- [ ] Re-enable `enable_thinking=true` in exported tokenizer
+- [ ] Package and submit to Kaggle; update leaderboard
+
 ## Next steps
 
 ### v0.9-plan.md
@@ -275,6 +302,13 @@ Flag files `.trainer_model_ready` / `.vllm_sidecar_ready` coordinate the sequenc
 4. Resolve open questions: `disable_adapter` on Unsloth PeftModel, vLLM LoRA hot-swap API, FP8+LoRA dtype
 5. Full run: `RUN_NAME=grpo_v10 bash scripts/run_grpo_sidecar.sh` in tmux
 6. Validate and submit
+
+### v0.11-lora-grpo-spark-plan.md
+1. Build `nemo-rl-spark:latest` on DGX Spark (Dockerfile.spark, `--build-arg MAX_JOBS=8`)
+2. Run HBM preflight + 3-step validation run
+3. Resolve open questions: NeMo Gym reward for competition data, warmstart HF→Megatron conversion
+4. Full GRPO training run (200–500 steps) in tmux
+5. Export via `convert_lora_to_hf.py`; validate and submit
 
 ## Infrastructure (complete)
 - [x] `Dockerfile.gb10` (26.04) — current primary image for all training runs

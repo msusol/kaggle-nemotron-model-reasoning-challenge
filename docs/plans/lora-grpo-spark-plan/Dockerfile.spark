@@ -1,0 +1,131 @@
+# Dockerfile for NeMo RL LoRA GRPO on DGX Spark (Blackwell GB10, aarch64)
+#
+# Targets:
+#   - CUDA compute capability sm_120 (GB200) and sm_121 (GB10/DGX Spark)
+#   - aarch64 / arm64 host architecture
+#   - NeMo RL nano-v3 branch (NemotronH Megatron backend support)
+#
+# Build:
+#   docker build -f Dockerfile.spark --build-arg MAX_JOBS=8 -t nemo-rl-spark:latest .
+#
+# Note: MAX_JOBS=8 is critical — the GB10 has 72 ARM cores and cmake without
+#   a job cap will OOM the host during causal-conv1d / mamba-ssm builds.
+
+# ── Base image ────────────────────────────────────────────────────────────────
+# pytorch:26.04-py3 is the first PyTorch NGC image with full GB10/arm64 support.
+# Must use the aarch64 variant (selected automatically via --platform if needed).
+FROM nvcr.io/nvidia/pytorch:26.04-py3
+
+ARG MAX_JOBS=8
+
+# ── CUDA architecture list ────────────────────────────────────────────────────
+# Must include sm_120 (GB200) and sm_121 (GB10 DGX Spark).
+# +PTX ensures forward compatibility with future Blackwell variants.
+ENV TORCH_CUDA_ARCH_LIST="8.0;8.6;8.7;8.9;9.0;12.0;12.1+PTX"
+ENV CUDA_HOME=/usr/local/cuda
+ENV MAX_JOBS=${MAX_JOBS}
+
+# ── Memory allocator tuning ───────────────────────────────────────────────────
+# expandable_segments: grows incrementally, reduces peak fragmentation
+# max_split_size_mb:512: prevents large blocks from being fragmented
+ENV PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512"
+
+# ── Disable pip version check (speeds up installs) ────────────────────────────
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# ── System dependencies ───────────────────────────────────────────────────────
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+    git \
+    git-lfs \
+    cmake \
+    ninja-build \
+    curl \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Core Python packages ──────────────────────────────────────────────────────
+# transformers 5.5.3 = first version with native NemotronHForCausalLM support.
+# Do NOT use trust_remote_code=True — the bundled code has a broken KV-cache.
+RUN pip install \
+    "transformers==5.5.3" \
+    "peft==0.14.0" \
+    "trl==0.15.2" \
+    "accelerate==1.3.0" \
+    "huggingface_hub" \
+    "uv" \
+    --break-system-packages --quiet
+
+# ── causal-conv1d — force source build for sm_120/121 ────────────────────────
+# Pre-built wheels target Hopper (sm_90) only. CAUSAL_CONV1D_FORCE_BUILD=TRUE
+# ensures the wheel is rebuilt from source even if a pre-built is available.
+RUN CAUSAL_CONV1D_FORCE_BUILD=TRUE \
+    pip install causal-conv1d \
+    --no-binary causal-conv1d \
+    --no-build-isolation \
+    --break-system-packages
+
+# ── mamba-ssm — source build + selective_scan_cuda import patch ──────────────
+# mamba-ssm silently skips building selective_scan_cuda.so when no GPU is
+# present during docker build. The patch wraps the import in try/except.
+# This is safe: Nemotron-H uses Mamba-2 Triton kernels exclusively and never
+# calls the Mamba-1 selective_scan_cuda CUDA path.
+RUN pip install mamba-ssm \
+    --no-binary mamba-ssm \
+    --no-build-isolation \
+    --break-system-packages \
+ && python3 -c "\
+f='/usr/local/lib/python3.12/dist-packages/mamba_ssm/ops/selective_scan_interface.py'; \
+c=open(f).read(); \
+needle='\nimport selective_scan_cuda\n'; \
+repl='\ntry:\n    import selective_scan_cuda\nexcept ImportError:\n    selective_scan_cuda = None\n'; \
+open(f,'w').write(c.replace(needle, repl, 1)) if needle in c else None; \
+print('mamba-ssm selective_scan_cuda patch: OK')"
+
+# ── bitsandbytes — source build for Blackwell (needed for QLoRA optimizer) ───
+# Pre-built wheels don't include sm_120/121. Source build required.
+RUN git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git /opt/bitsandbytes \
+ && cd /opt/bitsandbytes \
+ && cmake -DCOMPUTE_BACKEND=cuda \
+          -DCOMPUTE_CAPABILITY="80;86;87;89;90;120;121" \
+          -S . -B build \
+ && cmake --build build --config Release -j${MAX_JOBS} \
+ && pip install . --no-build-isolation --break-system-packages \
+ && rm -rf /opt/bitsandbytes
+
+# ── NeMo RL — nano-v3 branch ──────────────────────────────────────────────────
+# nano-v3 branch contains NemotronH (Mamba-H) Megatron model support.
+# main branch does not have this wired into the Megatron backend yet.
+RUN git clone \
+    --recurse-submodules \
+    -b nano-v3 \
+    --depth 1 \
+    https://github.com/NVIDIA-NeMo/RL.git \
+    /opt/nemo-rl
+
+WORKDIR /opt/nemo-rl
+
+# Install with Megatron Core extras
+RUN uv venv \
+ && uv pip install -e ".[mcore]" \
+    --no-build-isolation \
+    --extra-index-url https://pypi.ngc.nvidia.com
+
+# ── NeMo Gym — RL environments ────────────────────────────────────────────────
+RUN uv pip install nemo-gym
+
+# ── HuggingFace CLI ───────────────────────────────────────────────────────────
+RUN pip install huggingface_hub[cli] --break-system-packages --quiet
+
+# ── Verify key extensions compiled ───────────────────────────────────────────
+RUN python3 -c "\
+import causal_conv1d; print('causal_conv1d: OK'); \
+from mamba_ssm.ops import selective_scan_interface; print('mamba_ssm: OK'); \
+import transformers; assert transformers.__version__ >= '5.5.3'; print(f'transformers: {transformers.__version__} OK')"
+
+# ── Working directory and entrypoint ─────────────────────────────────────────
+WORKDIR /opt/nemo-rl
+
+ENV HF_HOME=/workspace/.cache/huggingface
+ENV TOKENIZERS_PARALLELISM=false
+
+CMD ["bash"]

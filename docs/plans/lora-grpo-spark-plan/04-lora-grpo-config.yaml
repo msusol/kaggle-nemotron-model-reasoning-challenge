@@ -1,0 +1,158 @@
+# LoRA GRPO config — single-node DGX Spark (GB10, 130 GB HBM)
+# Adapted from grpo-nanov3-30BA3B-2n8g-megatron-lora.yaml (official 2-node recipe)
+# Changes from the official recipe are annotated with # SPARK
+
+# ── Cluster ───────────────────────────────────────────────────────────────────
+cluster:
+  num_nodes: 1            # SPARK: was 2
+  gpus_per_node: 1        # SPARK: was 8 (GB10 is a single-GPU system)
+
+# ── Policy ────────────────────────────────────────────────────────────────────
+policy:
+  model_name: "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+  tokenizer:
+    name: "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+
+  # Reduce from 8192 to stay within KV cache + activation budget on 130 GB HBM
+  max_total_sequence_length: 4096   # SPARK: was 8192; reduce to 2048 if OOM
+
+  # ── Megatron training backend ────────────────────────────────────────────────
+  megatron_cfg:
+    enabled: true
+
+    # Parallelism — single GPU, collapse all parallelism dimensions to 1
+    tensor_model_parallel_size: 1           # SPARK: was 4
+    pipeline_model_parallel_size: 1         # SPARK: was 1 (unchanged)
+    expert_model_parallel_size: 1           # SPARK: was 8; all MoE experts on 1 GPU
+    sequence_parallel: false                # requires tensor_parallel > 1
+
+    # Activation checkpointing is essential on a single GPU — saves ~15–20 GB
+    # at the cost of ~30% slower backward pass (recomputes activations)
+    activation_checkpointing: true          # SPARK: critical
+
+    # ── LoRA (PEFT) configuration ─────────────────────────────────────────────
+    peft:
+      enabled: true
+      lora_rank: 32               # adapter rank; reduce to 16 if OOM, raise to 64 for capacity
+      lora_alpha: 64              # scaling factor; typically 2× rank
+      lora_dropout: 0.05
+      target_modules:             # apply LoRA to attention projections only
+        - "q_proj"
+        - "k_proj"
+        - "v_proj"
+        - "o_proj"
+      exclude_modules:            # never apply LoRA to the MoE router
+        - "router"                # router instability breaks MoE expert selection
+
+    # ── Optimizer ─────────────────────────────────────────────────────────────
+    # Only covers LoRA adapter parameters (~1–2 GB) not the full 60 GB model
+    optimizer:
+      name: "adam"
+      lr: 1.0e-4
+      betas: [0.9, 0.95]
+      eps: 1.0e-8
+      weight_decay: 0.01
+    scheduler:
+      name: "cosine_annealing"
+      warmup_steps: 10
+      min_lr: 1.0e-5
+
+    # DDP config — single GPU so most overlap settings are no-ops but kept for
+    # forward compatibility if you add a second Spark node later
+    distributed_data_parallel_config:
+      grad_reduce_in_fp32: false
+      overlap_grad_reduce: true
+      overlap_param_gather: true
+      average_in_collective: true
+      use_custom_fsdp: false
+      data_parallel_sharding_strategy: "optim_grads_params"
+
+  # ── Megatron inference backend (replaces vLLM for rollout generation) ───────
+  # This is the key change that makes single-Spark training feasible.
+  # The Megatron training weights are reused in-place for generation —
+  # no separate vLLM process, no weight copy, no refit buffer.
+  generation:
+    backend: "megatron"           # SPARK: was "vllm" — critical change
+    mcore_generation_config:
+      buffer_size_gb: 12          # SPARK: KV cache allocation; reduce to 8 if OOM
+      buffer_guaranteed_fraction: 0.1
+      num_cuda_graphs: 8          # SPARK: was 16; fewer graphs = less HBM overhead
+      block_size_tokens: 256      # KV cache block granularity
+      use_cuda_graphs_for_non_decode_steps: true
+      enable_chunked_prefill: true  # reduces peak memory during prefill
+
+  # Sequence packing — critical for single-GPU throughput
+  # Packs multiple short sequences into one forward pass up to max_total_sequence_length
+  sequence_packing:
+    enabled: true
+
+# ── GRPO algorithm ─────────────────────────────────────────────────────────────
+grpo:
+  # Number of completions generated per prompt for advantage estimation
+  num_generations: 4              # SPARK: was 8; fewer rollouts reduce KV cache pressure
+
+  # Batch sizes — scale down significantly for single GPU
+  rollout_batch_size: 32          # SPARK: was 512; prompts per rollout step
+  global_batch_size: 16           # SPARK: was 256; samples per gradient update
+
+  # Set to 3 for initial validation, remove for full training
+  # max_num_steps: 3
+
+  # Importance sampling correction — recommended when using Megatron backend
+  # because the rollout and training steps share the same model weights
+  use_importance_sampling_correction: true
+
+  # KL penalty to prevent policy from diverging too far from the base model
+  kl_coeff: 0.01
+
+  # ── DAPO extensions ────────────────────────────────────────────────────────
+  # DAPO (Decoupled Clip and Dynamic Sampling Policy Optimization) extends GRPO
+  # with better stability and efficiency — used in Nemotron 3 Nano's training
+
+  # Dynamic sampling: skip rollout groups where all generations have identical
+  # rewards (zero advantage variance) — saves compute on uninformative batches
+  dynamic_sampling:
+    enabled: true
+
+  # Asymmetric clipping: clip_higher > clip_lower allows more aggressive
+  # positive updates while still constraining negative policy changes
+  clip_higher: 0.28              # DAPO default; standard GRPO uses 0.2 for both
+  clip_lower: 0.2
+
+  # Token-level policy gradient loss (DAPO)
+  use_token_level_loss: true
+
+  # Overlong reward shaping — penalise responses that exceed max length
+  # Prevents degenerate "write forever" policy
+  overlong_reward_shaping:
+    enabled: true
+    penalty: -0.5                # reward penalty per token over the limit
+
+# ── Loss function ──────────────────────────────────────────────────────────────
+loss_fn:
+  use_importance_sampling_correction: true
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+data:
+  train_jsonl_fpath: "/workspace/data/train-split.jsonl"
+  validation_jsonl_fpath: "/workspace/data/val-split.jsonl"
+
+# ── Checkpointing ─────────────────────────────────────────────────────────────
+checkpointing:
+  checkpoint_dir: "/workspace/results/grpo-spark"
+  save_every_n_steps: 50
+  keep_last_n_checkpoints: 3     # limit disk usage
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logger:
+  log_dir: "/workspace/results/grpo-spark/logs"
+  wandb_enabled: false           # set to true and add wandb_project if using W&B
+  # wandb_project: "nemotron-nano-grpo-spark"
+  # wandb_name: "lora-grpo-spark-run-001"
+
+# ── NeMo Gym integration ───────────────────────────────────────────────────────
+# Uncomment and configure if running with NeMo Gym environments
+# nemo_gym:
+#   enabled: true
+#   environment: "math"          # math | code | science_qa | json_schema
+#   gym_config_path: "/workspace/docs/plans/lora-grpo-spark/gym-config.yaml"

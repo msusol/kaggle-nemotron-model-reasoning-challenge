@@ -150,28 +150,34 @@ _SC.write_text(
 
 # 5c. Patch cloudpickle in this driver process (catches ALL ConfigModuleInstance types
 #     universally by type name — no need to enumerate the 7+ individual types).
+#
+#     CRITICAL: Ray uses ray.cloudpickle (ray/cloudpickle/__init__.py) — a DIFFERENT
+#     module from the standalone cloudpickle package — for all actor serialization
+#     (ray._common.serialization.pickle_dumps).  We must patch BOTH packages.
 import cloudpickle as _cp
+import ray.cloudpickle as _rcp
 import sys as _sys_drv
 
 def _reconstruct_cmi_drv(mod_name, attr_name):
     import importlib
     return getattr(importlib.import_module(mod_name), attr_name)
 
-_orig_ro_drv = _cp.CloudPickler.reducer_override
+def _make_cmi_ro(orig_ro):
+    def _ro(self, obj):
+        result = orig_ro(self, obj)
+        if result is not NotImplemented:
+            return result
+        if type(obj).__name__ == 'ConfigModuleInstance':
+            for _k, _v in _sys_drv.modules.items():
+                if _v is obj:
+                    _pts = _k.rsplit('.', 1)
+                    if len(_pts) == 2:
+                        return (_reconstruct_cmi_drv, (_pts[0], _pts[1]))
+        return NotImplemented
+    return _ro
 
-def _ro_drv(self, obj):
-    result = _orig_ro_drv(self, obj)
-    if result is not NotImplemented:
-        return result
-    if type(obj).__name__ == 'ConfigModuleInstance':
-        for _k, _v in _sys_drv.modules.items():
-            if _v is obj:
-                _pts = _k.rsplit('.', 1)
-                if len(_pts) == 2:
-                    return (_reconstruct_cmi_drv, (_pts[0], _pts[1]))
-    return NotImplemented
-
-_cp.CloudPickler.reducer_override = _ro_drv
+_cp.CloudPickler.reducer_override = _make_cmi_ro(_cp.CloudPickler.reducer_override)
+_rcp.CloudPickler.reducer_override = _make_cmi_ro(_rcp.CloudPickler.reducer_override)
 
 # 5d. Patch worker_groups.py to insert cloudpickle fix inline in create_worker().
 #
@@ -190,29 +196,30 @@ _CMI_MARKER = "# [cloudpickle-cmi-patch]"
 if _CMI_MARKER not in _wg_src:
     _IND = "            "  # 12 spaces: body of create_worker inside two nested classes
     _WG_PATCH = (
-        _IND + _CMI_MARKER + " Override reducer_override to handle ALL ConfigModuleInstances.\n"
-        + _IND + "# torch.utils._config_module.install_config_module() creates a unique local class\n"
-        + _IND + "# ConfigModuleInstance per call (7+ types: torch.distributed.config, torch._dynamo.config,\n"
-        + _IND + "# torch._inductor.config, etc.).  Enumerating types is fragile; checking __name__\n"
-        + _IND + "# catches all of them universally at serialization time.\n"
+        _IND + _CMI_MARKER + " Override reducer_override in BOTH cloudpickle packages.\n"
+        + _IND + "# Ray uses ray.cloudpickle (NOT the standalone cloudpickle package) for all\n"
+        + _IND + "# actor serialization (ray._common.serialization.pickle_dumps).  We must patch\n"
+        + _IND + "# both.  Checking type(obj).__name__=='ConfigModuleInstance' catches all 7+\n"
+        + _IND + "# distinct types created by install_config_module() universally.\n"
         + _IND + "try:\n"
         + _IND + "    import cloudpickle as _ccp, sys as _sys\n"
+        + _IND + "    import ray.cloudpickle as _rccp\n"
         + _IND + "    def _recon_cmi(mn, an):\n"
         + _IND + "        import importlib as _il\n"
         + _IND + "        return getattr(_il.import_module(mn), an)\n"
-        + _IND + "    _orig_ro = _ccp.CloudPickler.reducer_override\n"
-        + _IND + "    def _ro_patched(self, obj):\n"
-        + _IND + "        result = _orig_ro(self, obj)\n"
-        + _IND + "        if result is not NotImplemented:\n"
-        + _IND + "            return result\n"
-        + _IND + "        if type(obj).__name__ == 'ConfigModuleInstance':\n"
-        + _IND + "            for _k, _v in _sys.modules.items():\n"
-        + _IND + "                if _v is obj:\n"
-        + _IND + "                    _pts = _k.rsplit('.', 1)\n"
-        + _IND + "                    if len(_pts) == 2:\n"
-        + _IND + "                        return (_recon_cmi, (_pts[0], _pts[1]))\n"
-        + _IND + "        return NotImplemented\n"
-        + _IND + "    _ccp.CloudPickler.reducer_override = _ro_patched\n"
+        + _IND + "    def _make_ro(orig):\n"
+        + _IND + "        def _ro(self, obj):\n"
+        + _IND + "            result = orig(self, obj)\n"
+        + _IND + "            if result is not NotImplemented: return result\n"
+        + _IND + "            if type(obj).__name__ == 'ConfigModuleInstance':\n"
+        + _IND + "                for _k, _v in _sys.modules.items():\n"
+        + _IND + "                    if _v is obj:\n"
+        + _IND + "                        _pts = _k.rsplit('.', 1)\n"
+        + _IND + "                        if len(_pts) == 2: return (_recon_cmi, (_pts[0], _pts[1]))\n"
+        + _IND + "            return NotImplemented\n"
+        + _IND + "        return _ro\n"
+        + _IND + "    _ccp.CloudPickler.reducer_override = _make_ro(_ccp.CloudPickler.reducer_override)\n"
+        + _IND + "    _rccp.CloudPickler.reducer_override = _make_ro(_rccp.CloudPickler.reducer_override)\n"
         + _IND + "except Exception:\n"
         + _IND + "    pass\n"
         + _IND + "# Set up worker arguments and resources\n"

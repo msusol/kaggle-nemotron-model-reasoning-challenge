@@ -107,7 +107,9 @@ RUN git clone \
 WORKDIR /opt/nemo-rl
 
 # Install with Megatron Core extras
+# setuptools must be in the uv venv before --no-build-isolation installs that need it
 RUN uv venv \
+ && uv pip install setuptools wheel packaging \
  && uv pip install -e ".[mcore]" \
     --no-build-isolation \
     --extra-index-url https://pypi.ngc.nvidia.com

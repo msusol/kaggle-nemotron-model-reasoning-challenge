@@ -9,7 +9,8 @@
   "enable_tpu": false,
   "enable_internet": false,
   "dataset_sources": [
-    "gdataranger/nemotron-v09-training-data"
+    "gdataranger/nemotron-v09-training-data",
+    "gdataranger/nemotron-v09-adapter-v9-kaggle-run1"
   ],
   "competition_sources": [
     "nvidia-nemotron-model-reasoning-challenge"

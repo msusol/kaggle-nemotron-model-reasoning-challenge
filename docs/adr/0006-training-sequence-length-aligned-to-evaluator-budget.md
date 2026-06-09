@@ -99,6 +99,34 @@ before comparing against `MAX_SEQ_LENGTH`, so the count already includes chat-te
   lost from training. If those problems appear in the test set, the model has no SFT signal
   for them beyond its base-model capability.
 
+## Clarification: MAX_SEQ_LENGTH is a training filter, not an inference cap
+
+`MAX_SEQ_LENGTH` controls **which examples are used for training**. It does not limit what
+the model can process at inference time.
+
+LoRA adapts the model's weight matrices (query, key, value, output projections and shared
+expert linear layers). It does not modify positional encodings, attention masks, or the
+sequence-length machinery. The base model handles length generalization from pretraining.
+At inference, the model can process any input up to the base model's native context limit
+(~128K tokens for Nemotron-3-Nano-30B) regardless of the `MAX_SEQ_LENGTH` used during
+LoRA fine-tuning.
+
+**What short-example training actually means at evaluation:**
+
+| Input length vs training range | Model behavior |
+|---|---|
+| Within training range | LoRA weights well-calibrated — gradients came from this distribution |
+| Beyond training range | Model still processes the input; LoRA provides weaker guidance; base model weights carry more of the load |
+
+The model does not skip, error, or produce empty output when it receives a long input it was
+not trained on. The degradation, if any, is in the quality of the LoRA adaptation's guidance
+for reasoning patterns specific to longer/harder problems — not in the ability to run inference.
+
+This is why the 4096-token alignment matters: not because ≤2048-token training was broken, but
+because it only trained the LoRA weights on the easiest ~22% of problems. The evaluator tests
+problems at all difficulty levels. Training at 4096 gives the LoRA weights useful gradients
+from 95.8% of the problem distribution.
+
 ## Related
 
 - ADR-0005 — adapter key filtering (Unsloth fused MoE vs standard PEFT/vLLM)

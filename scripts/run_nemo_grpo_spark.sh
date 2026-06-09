@@ -203,14 +203,15 @@ _dropper_pid=$!
 
 # ── Build Hydra config overrides ─────────────────────────────────────────────
 _OVERRIDES=(
-  "data.train_jsonl_fpath=${TRAIN_FILE}"
-  "data.validation_jsonl_fpath=${VAL_FILE}"
+  "data.train_data_path=${TRAIN_FILE}"
+  "data.val_data_path=${VAL_FILE}"
   "checkpointing.checkpoint_dir=/workspace/results/${EXP_NAME}"
   "logger.log_dir=/workspace/results/${EXP_NAME}/logs"
   "grpo.max_num_steps=${NUM_STEPS}"
 )
 if [[ "${RESUME}" == "1" ]]; then
-  _OVERRIDES+=("checkpointing.resume_from_checkpoint=true")
+  # CheckpointManager auto-detects from checkpoint_dir; no separate flag needed.
+  echo "RESUME=1: will attempt to continue from latest checkpoint in checkpoint_dir"
 fi
 
 echo ""
@@ -235,22 +236,25 @@ docker run \
   -e HF_HUB_OFFLINE=1 \
   -e TRANSFORMERS_OFFLINE=1 \
   -e HF_DATASETS_OFFLINE=1 \
+  -e LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libnccl.so.2 \
+  -e RAY_DISABLE_DASHBOARD=1 \
+  -e RAY_memory_monitor_refresh_ms=0 \
   -e PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512" \
   -e TORCH_CUDA_ARCH_LIST="12.1" \
   -e TOKENIZERS_PARALLELISM=false \
   -e HF_HOME=/workspace/.cache/huggingface \
+  -e HF_HUB_CACHE=/workspace/.cache/huggingface \
   -v "${WORKSPACE}":/workspace \
   -v "${WORKSPACE}/.cache/huggingface":/workspace/.cache/huggingface \
   -v "${WORKSPACE}/results":/workspace/results \
   -w /opt/nemo-rl \
   nemo-rl-spark:latest \
-  bash -c "
-    uv run python examples/nemo_gym/run_grpo_nemo_gym.py \
-      --config ${CONFIG_PATH} \
-      ${_OVERRIDES[*]}
-  " \
+  python3 /workspace/scripts/run_grpo_wrapper.py \
+    --config "${CONFIG_PATH}" \
+    "${_OVERRIDES[@]}" \
   2>&1 | tee "${LOG_FILE}"
-TRAIN_EXIT=${pipestatus[1]}
+TRAIN_EXIT=$(docker inspect "nemo-rl-spark-${RUN_NAME}" --format='{{.State.ExitCode}}' 2>/dev/null || echo 1)
+docker rm "nemo-rl-spark-${RUN_NAME}" 2>/dev/null || true
 set -e
 
 kill "${_dropper_pid:-}" 2>/dev/null || true

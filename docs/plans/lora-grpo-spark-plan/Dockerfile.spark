@@ -107,10 +107,13 @@ RUN git clone \
 WORKDIR /opt/nemo-rl
 
 # Install with Megatron Core extras
-# setuptools must be in the uv venv before --no-build-isolation installs that need it
+# setuptools must be in the uv venv before --no-build-isolation installs that need it.
+# TORCH_CUDA_ARCH_LIST scoped to sm_121 only: we only need the Spark arch at runtime,
+# and compiling all 7 arches during docker build OOMs the 130 GB unified memory pool.
 RUN uv venv --system-site-packages \
  && uv pip install setuptools wheel packaging \
- && uv pip install -e ".[mcore]" \
+ && TORCH_CUDA_ARCH_LIST="12.1" \
+    uv pip install -e ".[mcore]" \
     --no-build-isolation \
     --extra-index-url https://pypi.ngc.nvidia.com \
     --index-strategy unsafe-best-match

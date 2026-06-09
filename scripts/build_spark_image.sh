@@ -18,7 +18,7 @@ WORKSPACE="$(dirname "$SCRIPT_DIR")"
 
 DOCKERFILE="${WORKSPACE}/docs/plans/lora-grpo-spark-plan/Dockerfile.spark"
 IMAGE="nemo-rl-spark:latest"
-MAX_JOBS="${MAX_JOBS:-8}"
+MAX_JOBS="${MAX_JOBS:-4}"
 
 echo "Building ${IMAGE} from ${DOCKERFILE}"
 echo "MAX_JOBS=${MAX_JOBS}"

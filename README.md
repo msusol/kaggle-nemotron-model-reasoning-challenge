@@ -13,7 +13,45 @@ code generator. The approach is demonstrated in
 
 ## Goal
 
-The target competition is the **NVIDIA Nemotron Model Reasoning Challenge** on Kaggle. The required submission is a LoRA adapter for **Nemotron-3-Nano-30B** with rank at most 32, evaluated under vLLM with deterministic generation settings and a metric that prefers answers inside `\\boxed{}`.
+The target competition is the **NVIDIA Nemotron Model Reasoning Challenge** on Kaggle. The required submission is a LoRA adapter for **Nemotron-3-Nano-30B** (rank ≤ 32) scored by answer accuracy across 14 problem categories.
+
+### Evaluator constraints (from `metric/nvidia-nemotron-metric`)
+
+The competition scores submissions using **vLLM**, not HuggingFace PEFT. Key constraints that
+directly shape training decisions:
+
+| Constraint | Value | Implication |
+|---|---|---|
+| `max_model_len` | **4096 tokens** (prompt + output) | Train on examples ≤ 4096 tokens only |
+| `max_tokens` | **3584 tokens** (max output) | Thinking chain + `\boxed{answer}` must fit |
+| `enable_thinking` | **True** | Chat template must use thinking mode during training |
+| `temperature` | 1.0 | Score has ±0.01 variance between identical runs |
+| `max_lora_rank` | 32 | Matches our LoRA config |
+| Answer extraction | Last non-empty `\boxed{...}` in output | Training data must end with `\boxed{answer}` |
+
+### Training data alignment check
+
+`data/v0.9_train.jsonl` — 13,730 examples, 14 categories:
+
+```
+Token range    Count    Pct   Distribution
+-----------  -------  -----  ----------------------------------------
+      0–512    2,630  19.2%  ████████████████████
+    512–1024   1,465  10.7%  ███████████
+  1024–2048    5,216  38.0%  ████████████████████████████████████████
+  2048–3072    2,993  21.8%  ██████████████████████
+  3072–4096      854   6.2%  ██████
+  ───────────── 4096-token evaluator budget ──────────────────────────
+  4096–5120      282   2.1%  ██
+  5120+          290   2.1%  █
+
+Within budget: 13,158 / 13,730 (95.8%) · Median ~1,393 tok · p90 ~3,089 tok
+```
+
+100% of assistant responses end with a non-empty `\boxed{answer}`.  
+Training `apply_chat_template` already uses `enable_thinking=True` — format-aligned with evaluator.
+
+See [ADR-0006](docs/adr/0006-training-sequence-length-aligned-to-evaluator-budget.md) for full analysis.
 
 ## Hardware
 

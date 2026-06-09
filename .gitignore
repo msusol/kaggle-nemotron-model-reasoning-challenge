@@ -19,7 +19,12 @@ data/v0.5_train.jsonl
 data/v0.9_train.jsonl
 data/v0.9_valid.jsonl
 unsloth_compiled_cache/
-adapters/
+adapters/**/*.safetensors
+adapters/**/*.json.bak
+adapters/**/tokenizer.json
+adapters/**/tokenizer_config.json
+adapters/**/chat_template.jinja
+adapters/**/README.md
 .paused_containers
 .idea/
 submission.zip

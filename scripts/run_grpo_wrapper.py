@@ -57,39 +57,38 @@ if _ITER0.exists():
         print(f"[wrapper] Incomplete Megatron checkpoint ({_iter0_bytes // 1024} KB) — removing {_ITER0}")
         _shutil.rmtree(_ITER0)
 
-# 3c. Background thread: reset oom_score_adj=-300 for all container processes.
+# 3c. Background thread: drop page cache every 10 s inside the training container.
 #
-#     Ray explicitly sets oom_score_adj=1000 for actor worker processes so the
-#     Linux OOM killer kills workers before the raylet.  On GB10 unified HBM
-#     with 121 GB total, memory pressure during checkpoint save causes the OOM
-#     killer to fire and kill our Ray worker (confirmed via journalctl).
+#     On GB10 unified HBM (121 GB), reading the 60 GB HF safetensors fills page
+#     cache as the model loads.  Combined with the 60 GB CUDA Megatron model this
+#     exhausts all physical memory → OOM killer fires.
 #
-#     This thread overwrites oom_score_adj=-300 for all container processes
-#     every 3 seconds, overriding Ray's 1000 setting and protecting workers.
-import threading as _threading_oom
-import pathlib as _pathlib_oom
+#     The container runs --privileged so writing '3' to /proc/sys/vm/drop_caches
+#     from inside the container is equivalent to writing from the host — it reclaims
+#     clean (read-side) file-backed pages system-wide.  Running every 10 s keeps
+#     accumulated page cache < 20 GB between drops, leaving 60 GB headroom for the
+#     Megatron model after the 60 GB HF weights are active.
+#
+#     NOTE: This replaces the former oom_score_adj reset thread.  That thread caused
+#     host system services (nvidia-persistenced, systemd-journal, agetty) to be OOM-
+#     killed before our worker — catastrophic collateral damage.  The kernel handles
+#     page-cache reclamation automatically when under pressure; proactive dropping is
+#     the correct lever for unified-memory systems where read cache and CUDA compete.
+import threading as _threading_dc
+import time as _time_dc
 
-def _reset_oom_scores():
-    _proc = _pathlib_oom.Path("/proc")
+def _drop_cache_loop():
+    _dc_path = "/proc/sys/vm/drop_caches"
     while True:
+        _time_dc.sleep(10)
         try:
-            for _pd in _proc.iterdir():
-                if not _pd.name.isdigit():
-                    continue
-                _adj = _pd / "oom_score_adj"
-                try:
-                    _cur = int(_adj.read_text().strip())
-                    if _cur > 0:
-                        _adj.write_text("-300\n")
-                except (PermissionError, FileNotFoundError, ValueError, OSError):
-                    pass
-        except Exception:
-            pass
-        import time as _time_oom
-        _time_oom.sleep(3)
+            with open(_dc_path, "w") as _f:
+                _f.write("3\n")
+        except OSError:
+            pass  # non-privileged context — skip silently
 
-_oom_thread = _threading_oom.Thread(target=_reset_oom_scores, daemon=True)
-_oom_thread.start()
+_dc_thread = _threading_dc.Thread(target=_drop_cache_loop, daemon=True, name="cache-dropper")
+_dc_thread.start()
 
 # 4. Patch ray.init to disable the dashboard — virtual_cluster.py hardcodes
 #    include_dashboard=True, which crashes when the dashboard binary fails to
@@ -194,26 +193,29 @@ _SC.write_text(
     "except Exception:\n"
     "    pass\n"
     "\n"
-    "# Patch megatron.training.checkpointing.save_checkpoint to drop page cache\n"
-    "# and empty CUDA allocator cache before writing the 60 GB checkpoint.\n"
+    "# Patch megatron.bridge.training.checkpointing.save_checkpoint to drop page\n"
+    "# cache and empty CUDA allocator cache before writing the checkpoint.\n"
     "#\n"
-    "# Root cause (confirmed via journalctl OOM killer): on GB10 unified HBM the\n"
-    "# OS page cache retains the 60 GB of HF model safetensors read during\n"
-    "# HF→Megatron conversion.  After conversion: 60 GB CUDA (Megatron model)\n"
-    "# + 60 GB page cache = 120 GB out of 121 GB.  Any new allocation triggers\n"
-    "# the Linux OOM killer.  Ray sets oom_score_adj=1000 for actor workers, so\n"
-    "# the OOM killer always selects the Ray worker → SYSTEM_ERROR crash.\n"
+    "# Root cause (confirmed via journalctl OOM killer): on GB10 unified HBM\n"
+    "# (121 GB), torch.save copies all GPU tensors to CPU first (~54 GB extra).\n"
+    "# With 54 GB CUDA model + 57 GB anon (freed HF pages + Python + driver)\n"
+    "# physical memory is full.  Extra swap (60 GB) in run_nemo_grpo_spark.sh\n"
+    "# gives the kernel room to page out anon pages during the save.\n"
+    "# Dropping page cache here removes any residual read-cache pressure before\n"
+    "# the save, leaving maximum headroom for the CPU copy.\n"
     "#\n"
-    "# Fix: drop page cache (write '3' to /proc/sys/vm/drop_caches) inside the\n"
-    "# privileged container before save_checkpoint writes.  This frees the 60 GB\n"
-    "# page cache, leaving 60 GB free for the write (dirty pages) and metadata.\n"
+    "# IMPORTANT: the actual save call is in\n"
+    "#   megatron.bridge.training.model_load_save.save_megatron_model\n"
+    "# which imports save_checkpoint via 'from ... import'.  This hook fires\n"
+    "# when 'megatron.bridge.training.checkpointing' is first imported (before\n"
+    "# any 'from ... import'), so the module-level patch IS picked up by callers.\n"
     "#\n"
     "# Uses find_spec + wrapped loader (NOT find_module/load_module) to avoid\n"
     "# infinite recursion when importlib.util.find_spec re-enters our hook.\n"
     "import sys as _sys_msp\n"
     "class _MegatronSavePatcher:\n"
     "    def find_spec(self, name, path, target=None):\n"
-    "        if name != 'megatron.training.checkpointing':\n"
+    "        if name != 'megatron.bridge.training.checkpointing':\n"
     "            return None\n"
     "        for _f in _sys_msp.meta_path:\n"
     "            if _f is self:\n"
@@ -231,6 +233,13 @@ _SC.write_text(
     "                        _orig_ldr.exec_module(mod)\n"
     "                        _orig_sv = mod.save_checkpoint\n"
     "                        def _patched_sv(*a, **kw):\n"
+    "                            # Drop page cache and CUDA allocator cache before\n"
+    "                            # save_checkpoint writes the ~54 GB model checkpoint.\n"
+    "                            # This frees residual read-side page cache from the\n"
+    "                            # HF safetensors load, leaving maximum headroom for\n"
+    "                            # the CPU copy that torch.save creates.  The OOM is\n"
+    "                            # ultimately handled by 60 GB extra swap added in\n"
+    "                            # run_nemo_grpo_spark.sh; this just reduces pressure.\n"
     "                            try:\n"
     "                                import torch as _tc\n"
     "                                _tc.cuda.empty_cache()\n"

@@ -108,17 +108,27 @@ RUN git clone \
 
 WORKDIR /opt/nemo-rl
 
-# Install with Megatron Core extras
-# setuptools must be in the uv venv before --no-build-isolation installs that need it.
-# TORCH_CUDA_ARCH_LIST scoped to sm_121 only: we only need the Spark arch at runtime,
-# and compiling all 7 arches during docker build OOMs the 130 GB unified memory pool.
+# Install NeMo RL with Megatron Core extras via uv venv.
+# uv's --index-strategy unsafe-best-match resolves the vllm/transformers
+# conflict that system pip cannot. After install, purge torch, nvidia-nvshmem,
+# and nvidia-nccl from the venv: scripts/run_grpo_wrapper.py imports system
+# torch first (before venv site-packages enter sys.path) so torch's bundled
+# NCCL/NVSHMEM are used. Leaving venv nccl/nvshmem installed causes their
+# sitecustomize.py/.pth files to preload an older libnccl.so.2 via
+# PYTHONPATH, breaking ncclAlltoAll in libtorch_cuda.so at import time.
+# TORCH_CUDA_ARCH_LIST scoped to sm_121 only to avoid OOM during build on GB10.
 RUN uv venv --system-site-packages \
  && uv pip install setuptools wheel packaging \
  && TORCH_CUDA_ARCH_LIST="12.1" \
     uv pip install -e ".[mcore]" \
     --no-build-isolation \
     --extra-index-url https://pypi.ngc.nvidia.com \
-    --index-strategy unsafe-best-match
+    --index-strategy unsafe-best-match \
+ && .venv/bin/pip uninstall \
+    torch torchvision torchaudio \
+    nvidia-nvshmem-cu12 nvidia-nvshmem-cu11 \
+    nvidia-nccl-cu12 nvidia-nccl-cu11 \
+    -y 2>/dev/null; true
 
 # ── NeMo Gym — RL environments ────────────────────────────────────────────────
 RUN uv pip install nemo-gym

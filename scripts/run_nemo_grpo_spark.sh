@@ -97,11 +97,20 @@ done
 # ── Cleanup on exit ──────────────────────────────────────────────────────────
 _cleanup() {
   local exit_code=$?
+  docker stop nemo-page-dropper 2>/dev/null || true
   kill "${_dropper_pid:-}" 2>/dev/null || true
+
+  # Remove extra swap (created to give kernel room for CPU copy during checkpoint save)
+  # swapon/swapoff require root — use privileged container
+  docker run --rm --privileged -v /tmp:/tmp alpine sh -c \
+    'swapoff /tmp/grpo_extra_swap 2>/dev/null; rm -f /tmp/grpo_extra_swap; true' \
+    2>/dev/null || rm -f /tmp/grpo_extra_swap
 
   # Restore VM tuning
   docker run --rm --privileged alpine sh -c \
-    'echo 45166 > /proc/sys/vm/min_free_kbytes && echo 100 > /proc/sys/vm/vfs_cache_pressure' \
+    'echo 45166 > /proc/sys/vm/min_free_kbytes \
+     && echo 100 > /proc/sys/vm/vfs_cache_pressure \
+     && echo 60 > /proc/sys/vm/swappiness' \
     2>/dev/null || true
 
   bash "${SCRIPT_DIR}/services.sh" resume || true
@@ -201,12 +210,34 @@ docker run --rm --privileged -v /:/host alpine sh -c \
    && swapoff /host/swap.img 2>/dev/null; swapon /host/swap.img 2>/dev/null; true' \
   2>/dev/null || true
 
-# ── Page-cache dropper during training (every 30s) ───────────────────────────
-(while true; do
-  docker run --rm --privileged -v /:/host alpine sh -c \
-    'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null || true
-  sleep 30
-done) &
+# ── Extra swap for HF→Megatron checkpoint save ───────────────────────────────
+# On GB10 (121 GB unified HBM), saving the 54 GB Megatron checkpoint requires
+# torch.save to create a full CPU copy (~54 GB).  With the freed HF model pages
+# still in inactive_anon (39 GB) and existing 15 GB swap full, physical RAM is
+# exhausted → OOM.  Adding 60 GB swap gives the kernel room to page out the
+# inactive_anon pages during the save, keeping peak physical at ~108 GB.
+# swappiness=100 encourages the kernel to use this swap aggressively.
+echo "Creating 60 GB extra swap for checkpoint save..."
+rm -f /tmp/grpo_extra_swap
+# fallocate + mkswap + swapon all require root — run inside privileged container
+# (-v /tmp:/tmp mounts host /tmp so the swap file is on the host filesystem)
+docker run --rm --privileged -v /tmp:/tmp alpine sh -c \
+  'fallocate -l 60G /tmp/grpo_extra_swap \
+   && chmod 0600 /tmp/grpo_extra_swap \
+   && mkswap /tmp/grpo_extra_swap \
+   && swapon /tmp/grpo_extra_swap \
+   && echo 100 > /proc/sys/vm/swappiness \
+   && echo "Swap enabled successfully"'
+echo "Swap ready: $(free -h | grep Swap)"
+
+# ── Page-cache dropper during training (every 10s, single persistent container) ─
+# A long-running privileged container loops every 10 s — avoids the ~1 s startup
+# cost of spawning a fresh alpine container per drop.  The training container's own
+# wrapper.py also drops every 10 s; this is a belt-and-suspenders backup from the
+# host side in case the container's /proc/sys/vm/drop_caches write is throttled.
+docker rm -f nemo-page-dropper 2>/dev/null || true
+docker run --rm --privileged --name nemo-page-dropper alpine sh -c \
+  'while true; do echo 3 > /proc/sys/vm/drop_caches; sleep 10; done' &
 _dropper_pid=$!
 
 # ── Build Hydra config overrides ─────────────────────────────────────────────
@@ -260,7 +291,7 @@ docker run \
   python3 /workspace/scripts/run_grpo_wrapper.py \
     --config "${CONFIG_PATH}" \
     "${_OVERRIDES[@]}" \
-  2>&1 | tee "${LOG_FILE}"
+  2>&1 | tee -a "${LOG_FILE}"
 TRAIN_EXIT=$(docker inspect "nemo-rl-spark-${RUN_NAME}" --format='{{.State.ExitCode}}' 2>/dev/null || echo 1)
 docker rm "nemo-rl-spark-${RUN_NAME}" 2>/dev/null || true
 set -e

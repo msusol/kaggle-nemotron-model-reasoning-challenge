@@ -75,6 +75,8 @@ checkpointing:
   checkpoint_must_save_by: null
   model_save_format: "safetensors"
   save_consolidated: false
+  async_save: false
+  fully_parallel_save: false
 
 # ── Policy ─────────────────────────────────────────────────────────────────────
 policy:

@@ -14,6 +14,9 @@
 # Usage:
 #   tmux new -s build_spark
 #   bash scripts/build_spark_image.sh
+#
+#   # Force full rebuild ignoring layer cache:
+#   NO_CACHE=1 bash scripts/build_spark_image.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,6 +25,13 @@ WORKSPACE="$(dirname "$SCRIPT_DIR")"
 DOCKERFILE="${WORKSPACE}/docs/plans/lora-grpo-spark-plan/Dockerfile.spark"
 IMAGE="nemo-rl-spark:latest"
 MAX_JOBS="${MAX_JOBS:-4}"
+NO_CACHE="${NO_CACHE:-0}"
+
+_NO_CACHE_FLAG=""
+if [[ "${NO_CACHE}" == "1" ]]; then
+  _NO_CACHE_FLAG="--no-cache"
+  echo "NO_CACHE=1 — layer cache disabled"
+fi
 
 echo "Building ${IMAGE} from ${DOCKERFILE}"
 echo "MAX_JOBS=${MAX_JOBS}"
@@ -32,6 +42,7 @@ docker build \
   -f "${DOCKERFILE}" \
   --build-arg MAX_JOBS="${MAX_JOBS}" \
   --memory 100g \
+  ${_NO_CACHE_FLAG} \
   -t "${IMAGE}" \
   "${WORKSPACE}"
 

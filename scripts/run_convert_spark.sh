@@ -31,7 +31,14 @@ if [[ -f "${WORKSPACE}/.env" ]]; then
 fi
 
 FORCE="${FORCE:-0}"
-SWAP_GB="${SWAP_GB:-60}"
+SWAP_GB="${SWAP_GB:-100}"
+# Containment: cap the container's cgroup memory and make the container the
+# PREFERRED OOM victim, so a save overrun kills the container (exit 137) instead
+# of the host OOM killer taking out sshd / nvidia-persistenced / journald.
+# CONTAINER_MEM leaves headroom for host services on the 121 GB box.
+# CONTAINER_MEMSWAP = CONTAINER_MEM + container-visible swap (must be >= mem).
+CONTAINER_MEM="${CONTAINER_MEM:-112g}"
+CONTAINER_MEMSWAP="${CONTAINER_MEMSWAP:-212g}"
 CONFIG_PATH="${CONFIG_PATH:-/workspace/docs/plans/lora-grpo-spark-plan/04-lora-grpo-config.yaml}"
 LOG_FILE="${WORKSPACE}/output/convert_$(date +%Y%m%d_%H%M%S).log"
 RUN_NAME="convert_$(date +%Y%m%d_%H%M%S)"
@@ -43,10 +50,11 @@ if [[ "${FORCE}" == "1" ]]; then
   _FORCE_FLAG="--force"
 fi
 
-echo "CONFIG_PATH: ${CONFIG_PATH}"
-echo "FORCE:       ${FORCE}"
-echo "SWAP_GB:     ${SWAP_GB}"
-echo "Log:         ${LOG_FILE}"
+echo "CONFIG_PATH:   ${CONFIG_PATH}"
+echo "FORCE:         ${FORCE}"
+echo "SWAP_GB:       ${SWAP_GB}"
+echo "CONTAINER_MEM: ${CONTAINER_MEM} (memory-swap ${CONTAINER_MEMSWAP})"
+echo "Log:           ${LOG_FILE}"
 
 # ── Verify image ─────────────────────────────────────────────────────────────
 if ! docker image inspect nemo-rl-spark:latest >/dev/null 2>&1; then
@@ -161,7 +169,9 @@ set +e
 docker run \
   --name "nemo-convert-${RUN_NAME}" \
   --privileged \
-  --oom-score-adj -300 \
+  --memory="${CONTAINER_MEM}" \
+  --memory-swap="${CONTAINER_MEMSWAP}" \
+  --oom-score-adj 800 \
   -e NVIDIA_VISIBLE_DEVICES=all \
   --ipc=host \
   --ulimit memlock=-1 \

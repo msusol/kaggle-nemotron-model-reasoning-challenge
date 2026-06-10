@@ -389,3 +389,69 @@ covers all test categories.
 
 - Verify category distribution in `data/v0.4_train.jsonl` after corpus extraction to confirm
   all 14 categories are represented
+
+---
+
+## 5. Mamba SSM layers missing from v0.9 LoRA targets
+
+### Context
+
+After comparing huikang's `tinker-submission-notebook` and `adapter-validation-notebook`
+against our v0.9 training code, we found that v0.9's `_LORA_TARGETS` list omitted the
+Mamba SSM mixer's `in_proj` and `out_proj` modules. These are the primary projection layers
+inside every Mamba-2 block and make up ~50% of the model's transformer layers.
+
+### Investigation Checklist
+
+- [x] Pull huikang's actual submission adapter via `kaggle kernels output huikang/tinker-submission-notebook`
+- [x] Inspect `adapter_model.safetensors` header to enumerate all module types and layer counts
+- [x] Confirm `in_proj`/`out_proj` key path: `base_model.model.backbone.layers.N.mixer.{in,out}_proj.lora_{A,B}.weight`
+- [x] Verify PEFT module matching finds these by suffix — confirmed, no special handling needed
+- [x] Confirm no SVD merge required when targeting `in_proj` directly (vs NeMo's split approach)
+
+### Findings
+
+**The huikang reference adapter has 23 Mamba SSM layers fine-tuned, v0.9 had zero.**
+
+Inspecting the 3.3 GB reference adapter (`adapter_model.safetensors`, 12,010 keys):
+
+| Module | Tensors | Layers | Shape (lora_A) | Where |
+|---|---|---|---|---|
+| `down_proj` | 5,934 | 2,967 | varies | MoE expert FFN |
+| `up_proj` | 5,934 | 2,967 | varies | MoE expert FFN |
+| `in_proj` | 46 | **23** | `[32, 2688]` | **Mamba SSM mixer** |
+| `out_proj` | 46 | **23** | `[32, 4096]` | **Mamba SSM mixer** |
+| `k_proj` | 12 | 6 | — | Attention |
+| `o_proj` | 12 | 6 | — | Attention |
+| `q_proj` | 12 | 6 | — | Attention |
+| `v_proj` | 12 | 6 | — | Attention |
+| `lm_head` | 2 | 1 | — | Output head |
+
+**Key path**: `base_model.model.backbone.layers.N.mixer.in_proj.lora_A.weight`
+
+**No SVD merge needed.** Huikang's NeMo training split the Mamba projection into `gate_proj`
+and `x_proj` separately, requiring a post-training SVD to merge them back into `in_proj` for
+submission. In v0.9 we target `in_proj` directly with PEFT — single LoRA on the combined
+projection, output is immediately submission-ready.
+
+**No adapter bloat.** `in_proj`/`out_proj` are one module per Mamba layer (23 total), not
+per-expert — the MoE concern that caused the prior attention-only fallback does not apply.
+
+### Actions Taken
+
+- Added `"in_proj"` and `"out_proj"` to `_LORA_TARGETS` in `scripts/train_v9_sft.py:183`
+- Updated `cell-lora` in `notebook/v09_train_kaggle.ipynb`: main targets + fallback path
+- Updated `cell-save` key count comment: 418 → ~510 keys
+- Updated `docs/plans/v0.9-plan.md` parameter table with `target_modules` row
+
+### Resolution
+
+**Resolved** — both training entry points now target all Mamba SSM layers. The next v0.9
+training run will produce ~510-key adapters matching the reference adapter's layer coverage.
+
+### Follow-ups
+
+- Validate that Unsloth's `FastLanguageModel.get_peft_model` correctly applies LoRA to
+  `mixer.in_proj` / `mixer.out_proj` on NemotronH (watch for "0 layers modified" warning)
+- If Unsloth path skips these modules, the fallback PEFT path will handle them correctly
+- After first trained adapter: check key count is ~510 (not 418) to confirm the fix landed

@@ -209,9 +209,18 @@ See `docs/plans/v0.5-nemo-framework-plan.md`.
 See `docs/plans/v0.9-plan.md`.
 Base model init (no warmstart), format 4, all 14 competition categories, 1000 steps.
 
-- [ ] Confirm `scripts/train_v9_sft.py` + `scripts/run_train_v9.sh` are ready
-- [ ] Run training in tmux: `RUN_NAME=v9_sft bash scripts/run_train_v9.sh`
-- [ ] Validate, package, submit; update leaderboard
+- [x] Add `in_proj`/`out_proj` to `_LORA_TARGETS` — covers 23 Mamba SSM layers missing from prior target list (see `docs/investigate/huikang-pipeline.md` §5); expect ~510 adapter keys not 418
+- [x] Confirm `scripts/train_v9_sft.py` + `scripts/run_train_v9.sh` are ready
+- [ ] **Option A (Kaggle RTX Pro 6000)**: push updated notebook and run:
+  ```zsh
+  mkdir -p /tmp/nemotron-v09-kernel
+  cp notebook/v09_train_kaggle.ipynb /tmp/nemotron-v09-kernel/
+  cp notebook/v09-train-kaggle-kernel-metadata.json /tmp/nemotron-v09-kernel/kernel-metadata.json
+  kaggle kernels push -p /tmp/nemotron-v09-kernel
+  ```
+- [ ] **Option B (DGX/GB10 local)**: run in tmux: `RUN_NAME=v9_sft bash scripts/run_train_v9.sh`
+- [ ] Confirm trained adapter has ~510 keys (not 418) — verifies `in_proj`/`out_proj` landed
+- [ ] Validate, package (`scripts/package_submission.sh`), submit; update leaderboard
 
 ## Phase 7 — v0.10 GRPO + vLLM Sidecar
 
@@ -292,8 +301,9 @@ Replaces v0.10 on DGX Spark — vLLM sidecar is infeasible (OOM); uses Megatron 
 ## Next steps
 
 ### v0.9-plan.md
-1. Run `train_v9_sft.py` — 1000 steps, base init, all 14 cats, format 4
-2. Validate and submit; record Kaggle score in leaderboard
+1. Push updated notebook to Kaggle and trigger run (Option A), or run `run_train_v9.sh` on DGX (Option B)
+2. Confirm adapter has ~510 keys — verifies `in_proj`/`out_proj` Mamba SSM fix landed
+3. Validate and submit; record Kaggle score in leaderboard
 
 ### v0.10-grpo-sidecar-plan.md
 1. Rebuild `nemotron-vllm-gb10:latest` with peft + NVFP4 deps

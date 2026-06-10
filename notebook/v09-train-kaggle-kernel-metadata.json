@@ -4,7 +4,6 @@
   "code_file": "v09_train_kaggle.ipynb",
   "language": "python",
   "kernel_type": "notebook",
-  "is_private": true,
   "enable_gpu": false,
   "machine_shape": "NvidiaRtxPro6000",
   "enable_tpu": false,

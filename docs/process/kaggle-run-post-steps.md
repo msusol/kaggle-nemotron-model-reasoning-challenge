@@ -131,7 +131,9 @@ DATASET_DIR="/tmp/dataset_${RUN_NAME}"
 mkdir -p "$DATASET_DIR/adapter_${RUN_NAME}"
 cp "$ADAPTER_DIR"/adapter_config.json \
    "$ADAPTER_DIR"/adapter_model.safetensors \
-   "$DATASET_DIR/adapter_${RUN_NAME}/"
+   "$DATASET_DIR/"
+# NOTE: copy files to dataset root (not a subdirectory). --dir-mode zip flattens
+# the directory structure, so files land at /kaggle/input/<dataset-name>/ directly.
 
 # Create dataset metadata
 cat > "$DATASET_DIR/dataset-metadata.json" <<JSON
@@ -161,7 +163,7 @@ Update `notebook/v09_train_kaggle.ipynb` (`cell-config`):
 | Parameter | run6 → run7 example |
 |---|---|
 | `RUN_NAME` | `"v9_run7"` |
-| `WARMSTART_ADAPTER` | `"/kaggle/input/nemotron-v9-run6/adapter_v9_run6"` |
+| `WARMSTART_ADAPTER` | `"/kaggle/input/nemotron-v9-run6"` (dataset root — files land flat) |
 | `MAX_SEQ_LENGTH` | `7680` |
 | `MIN_SEQ_LENGTH` | `4096` |
 

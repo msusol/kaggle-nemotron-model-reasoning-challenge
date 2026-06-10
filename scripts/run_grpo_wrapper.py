@@ -57,6 +57,40 @@ if _ITER0.exists():
         print(f"[wrapper] Incomplete Megatron checkpoint ({_iter0_bytes // 1024} KB) — removing {_ITER0}")
         _shutil.rmtree(_ITER0)
 
+# 3c. Background thread: reset oom_score_adj=-300 for all container processes.
+#
+#     Ray explicitly sets oom_score_adj=1000 for actor worker processes so the
+#     Linux OOM killer kills workers before the raylet.  On GB10 unified HBM
+#     with 121 GB total, memory pressure during checkpoint save causes the OOM
+#     killer to fire and kill our Ray worker (confirmed via journalctl).
+#
+#     This thread overwrites oom_score_adj=-300 for all container processes
+#     every 3 seconds, overriding Ray's 1000 setting and protecting workers.
+import threading as _threading_oom
+import pathlib as _pathlib_oom
+
+def _reset_oom_scores():
+    _proc = _pathlib_oom.Path("/proc")
+    while True:
+        try:
+            for _pd in _proc.iterdir():
+                if not _pd.name.isdigit():
+                    continue
+                _adj = _pd / "oom_score_adj"
+                try:
+                    _cur = int(_adj.read_text().strip())
+                    if _cur > 0:
+                        _adj.write_text("-300\n")
+                except (PermissionError, FileNotFoundError, ValueError, OSError):
+                    pass
+        except Exception:
+            pass
+        import time as _time_oom
+        _time_oom.sleep(3)
+
+_oom_thread = _threading_oom.Thread(target=_reset_oom_scores, daemon=True)
+_oom_thread.start()
+
 # 4. Patch ray.init to disable the dashboard — virtual_cluster.py hardcodes
 #    include_dashboard=True, which crashes when the dashboard binary fails to
 #    write its .err file in a fresh container /tmp directory.
@@ -160,37 +194,59 @@ _SC.write_text(
     "except Exception:\n"
     "    pass\n"
     "\n"
-    "# Patch megatron.training.checkpointing.save_checkpoint to call\n"
-    "# torch.cuda.empty_cache() before writing the 60 GB checkpoint.\n"
-    "# On GB10 unified HBM, PyTorch's CUDA allocator holds freed tensors\n"
-    "# (e.g., the HF model after conversion) in its cache — they count against\n"
-    "# system RAM. Combined with dirty page-cache from the 60 GB write, this\n"
-    "# pushes past 121 GB HBM and triggers OOM. empty_cache() releases the\n"
-    "# allocator cache back to the OS (via expandable_segments cuMemRelease).\n"
+    "# Patch megatron.training.checkpointing.save_checkpoint to drop page cache\n"
+    "# and empty CUDA allocator cache before writing the 60 GB checkpoint.\n"
+    "#\n"
+    "# Root cause (confirmed via journalctl OOM killer): on GB10 unified HBM the\n"
+    "# OS page cache retains the 60 GB of HF model safetensors read during\n"
+    "# HF→Megatron conversion.  After conversion: 60 GB CUDA (Megatron model)\n"
+    "# + 60 GB page cache = 120 GB out of 121 GB.  Any new allocation triggers\n"
+    "# the Linux OOM killer.  Ray sets oom_score_adj=1000 for actor workers, so\n"
+    "# the OOM killer always selects the Ray worker → SYSTEM_ERROR crash.\n"
+    "#\n"
+    "# Fix: drop page cache (write '3' to /proc/sys/vm/drop_caches) inside the\n"
+    "# privileged container before save_checkpoint writes.  This frees the 60 GB\n"
+    "# page cache, leaving 60 GB free for the write (dirty pages) and metadata.\n"
+    "#\n"
+    "# Uses find_spec + wrapped loader (NOT find_module/load_module) to avoid\n"
+    "# infinite recursion when importlib.util.find_spec re-enters our hook.\n"
     "import sys as _sys_msp\n"
     "class _MegatronSavePatcher:\n"
-    "    def find_module(self, name, path=None):\n"
-    "        return self if name == 'megatron.training.checkpointing' else None\n"
-    "    def load_module(self, name):\n"
-    "        if name in _sys_msp.modules:\n"
-    "            return _sys_msp.modules[name]\n"
-    "        import importlib.util as _iu\n"
-    "        _sp = _iu.find_spec(name)\n"
-    "        _md = _iu.module_from_spec(_sp)\n"
-    "        _sys_msp.modules[name] = _md\n"
-    "        _sp.loader.exec_module(_md)\n"
-    "        _orig_sv = _md.save_checkpoint\n"
-    "        def _patched_sv(*a, **kw):\n"
+    "    def find_spec(self, name, path, target=None):\n"
+    "        if name != 'megatron.training.checkpointing':\n"
+    "            return None\n"
+    "        for _f in _sys_msp.meta_path:\n"
+    "            if _f is self:\n"
+    "                continue\n"
     "            try:\n"
-    "                import torch as _tc\n"
-    "                _tc.cuda.empty_cache()\n"
-    "                import gc as _gc\n"
-    "                _gc.collect()\n"
-    "            except Exception:\n"
-    "                pass\n"
-    "            return _orig_sv(*a, **kw)\n"
-    "        _md.save_checkpoint = _patched_sv\n"
-    "        return _md\n"
+    "                _sp = _f.find_spec(name, path, target)\n"
+    "                if _sp is None:\n"
+    "                    continue\n"
+    "                _orig_ldr = _sp.loader\n"
+    "                class _PatchedLoader:\n"
+    "                    def create_module(self2, spec):\n"
+    "                        try: return _orig_ldr.create_module(spec)\n"
+    "                        except AttributeError: return None\n"
+    "                    def exec_module(self2, mod):\n"
+    "                        _orig_ldr.exec_module(mod)\n"
+    "                        _orig_sv = mod.save_checkpoint\n"
+    "                        def _patched_sv(*a, **kw):\n"
+    "                            try:\n"
+    "                                import torch as _tc\n"
+    "                                _tc.cuda.empty_cache()\n"
+    "                                import gc as _gc; _gc.collect()\n"
+    "                            except Exception: pass\n"
+    "                            try:\n"
+    "                                with open('/proc/sys/vm/drop_caches', 'w') as _dc:\n"
+    "                                    _dc.write('3\\n')\n"
+    "                            except Exception: pass\n"
+    "                            return _orig_sv(*a, **kw)\n"
+    "                        mod.save_checkpoint = _patched_sv\n"
+    "                _sp.loader = _PatchedLoader()\n"
+    "                return _sp\n"
+    "            except (AttributeError, TypeError):\n"
+    "                continue\n"
+    "        return None\n"
     "_sys_msp.meta_path.insert(0, _MegatronSavePatcher())\n"
 )
 

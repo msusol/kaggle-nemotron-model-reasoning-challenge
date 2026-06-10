@@ -15,6 +15,21 @@ if [ ! -f "$ADAPTER_DIR/adapter_model.safetensors" ] && [ ! -f "$ADAPTER_DIR/ada
   exit 1
 fi
 
+# ── Patch adapter_config.json ────────────────────────────────────────────────
+# Unsloth writes a Kaggle-internal path for base_model_name_or_path and sets
+# auto_mapping to a custom class dict. Both break the vLLM evaluator.
+python3 - "$ADAPTER_DIR/adapter_config.json" <<'PYEOF'
+import json, sys
+p = sys.argv[1]
+cfg = json.load(open(p))
+cfg["base_model_name_or_path"] = "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+cfg["auto_mapping"] = None
+json.dump(cfg, open(p, "w"), indent=2)
+print(f"Patched {p}")
+print(f"  base_model_name_or_path: {cfg['base_model_name_or_path']}")
+print(f"  auto_mapping: {cfg['auto_mapping']}")
+PYEOF
+
 rm -f "$ZIP_PATH"
 # Build file list from what actually exists in the adapter dir.
 # special_tokens_map.json is absent from Nemotron-H adapters; zip it only if present.

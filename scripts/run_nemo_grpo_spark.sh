@@ -144,6 +144,10 @@ docker run --rm --privileged -v /:/host alpine sh -c \
   'echo 3 > /proc/sys/vm/drop_caches \
    && echo 1048576 > /proc/sys/vm/min_free_kbytes \
    && echo 500 > /proc/sys/vm/vfs_cache_pressure \
+   && echo 1 > /proc/sys/vm/dirty_background_ratio \
+   && echo 2 > /proc/sys/vm/dirty_ratio \
+   && echo 100 > /proc/sys/vm/dirty_writeback_centisecs \
+   && echo 100 > /proc/sys/vm/dirty_expire_centisecs \
    && swapoff /host/swap.img 2>/dev/null; swapon /host/swap.img 2>/dev/null; true' \
   2>/dev/null || true
 
@@ -190,6 +194,10 @@ docker run --rm --privileged -v /:/host alpine sh -c \
   'echo 3 > /proc/sys/vm/drop_caches \
    && echo 1048576 > /proc/sys/vm/min_free_kbytes \
    && echo 500 > /proc/sys/vm/vfs_cache_pressure \
+   && echo 1 > /proc/sys/vm/dirty_background_ratio \
+   && echo 2 > /proc/sys/vm/dirty_ratio \
+   && echo 100 > /proc/sys/vm/dirty_writeback_centisecs \
+   && echo 100 > /proc/sys/vm/dirty_expire_centisecs \
    && swapoff /host/swap.img 2>/dev/null; swapon /host/swap.img 2>/dev/null; true' \
   2>/dev/null || true
 

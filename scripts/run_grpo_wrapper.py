@@ -44,6 +44,19 @@ os.environ["PYTHONPATH"] = (
 _SCRIPT = os.path.join(_NEMO_RL, "examples", "run_grpo_math.py")
 sys.argv[0] = _SCRIPT
 
+# 3b. Auto-clean incomplete Megatron checkpoints (partial iter_0000000/ from a
+#     crashed save).  Only common.pt (12 KB) with no model weight shards signals
+#     an incomplete save.  Delete so HF→Megatron conversion runs fresh.
+import shutil as _shutil
+import pathlib as _pathlib_ck
+_NEMO_CACHE_DIR = _pathlib_ck.Path("/workspace/.cache/huggingface/nemo_rl")
+_ITER0 = _NEMO_CACHE_DIR / "nvidia" / "NVIDIA-Nemotron-3-Nano-30B-A3B-BF16" / "iter_0000000"
+if _ITER0.exists():
+    _iter0_bytes = sum(f.stat().st_size for f in _ITER0.rglob("*") if f.is_file())
+    if _iter0_bytes < 100 * 1024 * 1024:  # < 100 MB → incomplete (no model weights)
+        print(f"[wrapper] Incomplete Megatron checkpoint ({_iter0_bytes // 1024} KB) — removing {_ITER0}")
+        _shutil.rmtree(_ITER0)
+
 # 4. Patch ray.init to disable the dashboard — virtual_cluster.py hardcodes
 #    include_dashboard=True, which crashes when the dashboard binary fails to
 #    write its .err file in a fresh container /tmp directory.
@@ -146,6 +159,39 @@ _SC.write_text(
     "    except: pass\n"
     "except Exception:\n"
     "    pass\n"
+    "\n"
+    "# Patch megatron.training.checkpointing.save_checkpoint to call\n"
+    "# torch.cuda.empty_cache() before writing the 60 GB checkpoint.\n"
+    "# On GB10 unified HBM, PyTorch's CUDA allocator holds freed tensors\n"
+    "# (e.g., the HF model after conversion) in its cache — they count against\n"
+    "# system RAM. Combined with dirty page-cache from the 60 GB write, this\n"
+    "# pushes past 121 GB HBM and triggers OOM. empty_cache() releases the\n"
+    "# allocator cache back to the OS (via expandable_segments cuMemRelease).\n"
+    "import sys as _sys_msp\n"
+    "class _MegatronSavePatcher:\n"
+    "    def find_module(self, name, path=None):\n"
+    "        return self if name == 'megatron.training.checkpointing' else None\n"
+    "    def load_module(self, name):\n"
+    "        if name in _sys_msp.modules:\n"
+    "            return _sys_msp.modules[name]\n"
+    "        import importlib.util as _iu\n"
+    "        _sp = _iu.find_spec(name)\n"
+    "        _md = _iu.module_from_spec(_sp)\n"
+    "        _sys_msp.modules[name] = _md\n"
+    "        _sp.loader.exec_module(_md)\n"
+    "        _orig_sv = _md.save_checkpoint\n"
+    "        def _patched_sv(*a, **kw):\n"
+    "            try:\n"
+    "                import torch as _tc\n"
+    "                _tc.cuda.empty_cache()\n"
+    "                import gc as _gc\n"
+    "                _gc.collect()\n"
+    "            except Exception:\n"
+    "                pass\n"
+    "            return _orig_sv(*a, **kw)\n"
+    "        _md.save_checkpoint = _patched_sv\n"
+    "        return _md\n"
+    "_sys_msp.meta_path.insert(0, _MegatronSavePatcher())\n"
 )
 
 # 5c. Patch cloudpickle in this driver process (catches ALL ConfigModuleInstance types

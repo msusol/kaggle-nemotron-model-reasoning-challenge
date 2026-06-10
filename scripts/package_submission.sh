@@ -38,9 +38,12 @@ OPTIONAL=(special_tokens_map.json)
 for f in "${OPTIONAL[@]}"; do
   [[ -f "$ADAPTER_DIR/$f" ]] && FILES+=("$f")
 done
+# Zip with the adapter directory as a prefix (e.g. adapter_v9_run6/adapter_config.json).
+# The Kaggle evaluator expects this subdirectory layout — a flat zip (files at root) errors.
+ADAPTER_NAME="$(basename "$ADAPTER_DIR")"
 (
-  cd "$ADAPTER_DIR"
-  zip "$ZIP_PATH" "${FILES[@]}"
+  cd "$(dirname "$ADAPTER_DIR")"
+  zip "$ZIP_PATH" "${FILES[@]/#/${ADAPTER_NAME}/}"
 )
 
 echo "Created $ZIP_PATH"

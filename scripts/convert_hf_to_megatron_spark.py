@@ -34,19 +34,23 @@ It writes to the exact path the worker reads:
     $HF_HOME/nemo_rl/<model_name>/iter_0000000/
 matching get_megatron_checkpoint_dir() + the worker's pretrained_path logic.
 
-IMPORTANT: the import ordering below (system torch BEFORE the uv venv is added
-to sys.path) is copied from scripts/run_grpo_wrapper.py and is required to avoid
-the ncclAlltoAll undefined-symbol crash. Do not reorder.
+IMPORTANT: must be launched with the venv interpreter
+(/opt/nemo-rl/.venv/bin/python3), NOT the system python3. megatron-bridge is an
+EDITABLE install -- its import is wired up by the venv's site.py at interpreter
+startup, so merely appending site-packages to sys.path (as run_grpo_wrapper.py
+does for the *driver*) does not expose `megatron.bridge`. This mirrors how
+NeMo-RL runs the real MegatronPolicyWorker (py_executable = venv python). The
+container's LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libnccl.so.2 loads system NCCL
+first, so the ncclAlltoAll undefined-symbol crash does not occur under the venv
+python. run_convert_spark.sh sets both.
 """
 
 import os
 import sys
 
-# ---------------------------------------------------------------------------
-# 1. Load system torch FIRST -- sys.path has no venv packages yet, so
-#    libtorch_cuda.so binds ncclAlltoAll from torch's own bundled libnccl.so.2.
-#    (Same rationale as run_grpo_wrapper.py steps 1-2.)
-# ---------------------------------------------------------------------------
+# Under the venv interpreter these are already on sys.path; insert as a harmless
+# fallback (and add the nemo-rl source root). This does NOT make editable
+# megatron-bridge importable on its own -- the venv python is what does that.
 import torch  # noqa: E402
 
 _NEMO_RL = "/opt/nemo-rl"
@@ -54,9 +58,6 @@ _VENV_SITE = "/opt/nemo-rl/.venv/lib/python3.12/site-packages"
 for _p in (_NEMO_RL, _VENV_SITE):
     if _p not in sys.path:
         sys.path.insert(0, _p)
-os.environ["PYTHONPATH"] = (
-    _VENV_SITE + ":" + _NEMO_RL + ":" + os.environ.get("PYTHONPATH", "")
-)
 
 # ---------------------------------------------------------------------------
 # 1b. Stub nemo_rl.models.generation.fp8 (top-level imports vllm's _C.abi3.so,

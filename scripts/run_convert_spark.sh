@@ -180,7 +180,7 @@ docker run \
   -v "${WORKSPACE}/.cache/huggingface":/workspace/.cache/huggingface \
   -w /opt/nemo-rl \
   nemo-rl-spark:latest \
-  python3 /workspace/scripts/convert_hf_to_megatron_spark.py \
+  /opt/nemo-rl/.venv/bin/python3 /workspace/scripts/convert_hf_to_megatron_spark.py \
     --config "${CONFIG_PATH}" ${_FORCE_FLAG} \
   2>&1 | tee -a "${LOG_FILE}"
 CONVERT_EXIT=$(docker inspect "nemo-convert-${RUN_NAME}" --format='{{.State.ExitCode}}' 2>/dev/null || echo 1)

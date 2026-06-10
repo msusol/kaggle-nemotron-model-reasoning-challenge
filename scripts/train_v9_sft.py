@@ -180,7 +180,7 @@ def main():
     # Explicit names bypass that check and let Unsloth apply its full memory opts
     # (gradient offloading, etc.) which are only active when _lora_via_unsloth=True.
     _LORA_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj",
-                     "gate_proj", "up_proj", "down_proj"]
+                     "gate_proj", "up_proj", "down_proj", "in_proj", "out_proj"]
 
     if args.warmstart_adapter:
         # Load a completed adapter and continue training it on the new data slice.

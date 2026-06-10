@@ -25,3 +25,6 @@ openai>=1.0
 
 # Utilities
 tqdm>=4.66
+
+kaggle>=1.8.0
+kagglehub>=0.4.1

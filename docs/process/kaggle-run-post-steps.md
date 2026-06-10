@@ -95,6 +95,17 @@ bash scripts/package_submission.sh "$ADAPTER_DIR" "$SUBMISSION_DIR"
 
 ## 5. Submit to competition
 
+**Before submitting**, check the most recent submission to avoid duplicates if a prior
+session's background upload was still running:
+
+```zsh
+kaggle competitions submissions nvidia-nemotron-model-reasoning-challenge | head -2
+# Confirm the most recent submission is NOT already the run you are about to submit.
+# Background uploads survive session end; a "failed" session may have succeeded.
+```
+
+Then submit:
+
 ```zsh
 kaggle competitions submit nvidia-nemotron-model-reasoning-challenge \
   -f "$SUBMISSION_DIR/submission.zip" \

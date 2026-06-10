@@ -79,7 +79,8 @@ _cleanup() {
   docker run --rm --privileged alpine sh -c \
     'echo 45166 > /proc/sys/vm/min_free_kbytes \
      && echo 100 > /proc/sys/vm/vfs_cache_pressure \
-     && echo 60 > /proc/sys/vm/swappiness' \
+     && echo 60 > /proc/sys/vm/swappiness \
+     && echo 0 > /proc/sys/vm/oom_kill_allocating_task' \
     2>/dev/null || true
 
   bash "${SCRIPT_DIR}/services.sh" resume 2>/dev/null || true
@@ -123,6 +124,7 @@ docker run --rm --privileged -v /:/host alpine sh -c \
    && echo 2 > /proc/sys/vm/dirty_ratio \
    && echo 100 > /proc/sys/vm/dirty_writeback_centisecs \
    && echo 100 > /proc/sys/vm/dirty_expire_centisecs \
+   && echo 1 > /proc/sys/vm/oom_kill_allocating_task \
    && swapoff /host/swap.img 2>/dev/null; swapon /host/swap.img 2>/dev/null; true' \
   2>/dev/null || true
 

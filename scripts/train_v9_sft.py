@@ -207,6 +207,40 @@ def main():
         _lora_via_unsloth = _unsloth_loaded  # base is still Unsloth-patched
         print("Adapter loaded and set to trainable (warmstart mode)", flush=True)
     elif _unsloth_loaded:
+        # ── per-expert MoE LoRA patch ─────────────────────────────────────────────
+        # Unsloth's moe_utils.py only activates the per-expert batched LoRA path
+        # (ParamWrapper lora_A shape [E*r, in_dim]) for models with
+        # model_type="gpt_oss" and experts class named "GptOssExperts".
+        # NemotronH uses model_type="nemotron_h" / class NemotronHExperts — both
+        # checks fail, so DGX Unsloth falls back to scalar shared LoRA (~27M params
+        # instead of ~455M) that trains no per-expert specialisation.
+        # The Kaggle notebook avoids this via trust_remote_code=True which loads
+        # NVIDIA's hub custom code (model_type="gpt_oss", GptOssExperts class).
+        # Fix: temporarily rename and restore around get_peft_model so the existing
+        # Unsloth machinery fires.  Then explicitly call patch_gpt_oss_grouped_mm_format
+        # to set _unsloth_grouped_mm_format=True on all expert modules (needed for
+        # the separated grouped-GEMM LoRA forward pass).
+        # Rename NemotronHExperts → GptOssExperts and model_type → gpt_oss so that
+        # Unsloth's patched peft.get_peft_model triggers the per-expert batched LoRA
+        # initialisation path (ParamWrapper lora_A shape [E*r, in_dim] = [4096, 2688]).
+        _nh_experts_cls = None
+        _orig_cls_name  = ""
+        _orig_qualname  = ""
+        _orig_model_type = ""
+        try:
+            import transformers.models.nemotron_h.modeling_nemotron_h as _nh_mod
+            _nh_experts_cls  = _nh_mod.NemotronHExperts
+            _orig_cls_name   = _nh_experts_cls.__name__
+            _orig_qualname   = _nh_experts_cls.__qualname__
+            _orig_model_type = getattr(model.config, "model_type", "nemotron_h")
+            _nh_experts_cls.__name__    = "GptOssExperts"
+            _nh_experts_cls.__qualname__ = "GptOssExperts"
+            object.__setattr__(model.config, "model_type", "gpt_oss")
+            print("[moe-patch] NemotronHExperts renamed → GptOssExperts, model_type → gpt_oss", flush=True)
+        except Exception as _ep:
+            _nh_experts_cls = None
+            print(f"[moe-patch] WARNING: pre-rename failed ({_ep})", flush=True)
+
         try:
             model = FastLanguageModel.get_peft_model(
                 model,
@@ -222,6 +256,44 @@ def main():
         except Exception as _e:
             print(f"FastLanguageModel.get_peft_model failed ({_e})", flush=True)
             print("Falling back to standard PEFT on Unsloth-patched model", flush=True)
+        finally:
+            if _nh_experts_cls is not None:
+                _nh_experts_cls.__name__    = _orig_cls_name
+                _nh_experts_cls.__qualname__ = _orig_qualname
+                object.__setattr__(model.config, "model_type", _orig_model_type)
+
+        # Explicitly set _unsloth_grouped_mm_format=True on all NemotronHExperts
+        # modules so the separated grouped-GEMM LoRA forward path fires during training.
+        try:
+            from unsloth_compiled_cache.moe_utils import patch_gpt_oss_grouped_mm_format as _pgof
+            if _nh_experts_cls is not None:
+                _nh_experts_cls.__name__    = "GptOssExperts"
+                _nh_experts_cls.__qualname__ = "GptOssExperts"
+                object.__setattr__(model.config, "model_type", "gpt_oss")
+            _n_patched = _pgof(model)
+            if _nh_experts_cls is not None:
+                _nh_experts_cls.__name__    = _orig_cls_name
+                _nh_experts_cls.__qualname__ = _orig_qualname
+                object.__setattr__(model.config, "model_type", _orig_model_type)
+            print(f"[moe-patch] grouped_mm flag set on {_n_patched} expert modules", flush=True)
+        except Exception as _ep:
+            print(f"[moe-patch] WARNING: patch_gpt_oss_grouped_mm_format failed ({_ep})", flush=True)
+
+        # Diagnostic: log the first expert module's LoRA shapes to confirm
+        # per-expert ([E*r, in_dim] = [4096, 2688]) vs scalar ([r, in_dim] = [32, 2688]).
+        try:
+            for _mn, _m in model.named_modules():
+                if type(_m).__name__ in ("NemotronHExperts", "GptOssExperts"):
+                    _gu = getattr(_m, "gate_up_proj", None)
+                    if _gu is not None and hasattr(_gu, "lora_A"):
+                        _a = next(iter(_gu.lora_A.values())).weight
+                        _b = next(iter(_gu.lora_B.values())).weight
+                        _per = _a.shape[0] > args.lora_r
+                        print(f"[moe-patch] expert LoRA shapes — lora_A: {list(_a.shape)}  lora_B: {list(_b.shape)}", flush=True)
+                        print(f"[moe-patch] per-expert={'YES ✓' if _per else 'NO — scalar (patch did not activate)'}", flush=True)
+                    break
+        except Exception:
+            pass
 
     if not _lora_via_unsloth and not args.warmstart_adapter:
         from peft import LoraConfig, get_peft_model as _std_get_peft_model

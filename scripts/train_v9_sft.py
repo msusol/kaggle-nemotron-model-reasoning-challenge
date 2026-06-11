@@ -145,7 +145,6 @@ def main():
             load_in_4bit=False,
             load_in_8bit=False,
             full_finetuning=False,
-            trust_remote_code=True,
             unsloth_force_compile=False,
             attn_implementation="eager",
         )
@@ -421,13 +420,14 @@ def main():
         logging_steps=10,
         save_strategy="no",
         bf16=True,
-        gradient_checkpointing=False,
+        gradient_checkpointing=True,           # Unsloth silently disables native GC when False → step-0 OOM at seq_len>=4096
         gradient_checkpointing_kwargs={"use_reentrant": False},
         dataloader_num_workers=2,
         remove_unused_columns=False,
         seed=args.seed,
         report_to="none",
         packing=False,
+        padding_free=False,             # prevent Unsloth auto-enabling padding_free, which bypasses stratified sampler
     )
 
     trainer = StratifiedSFTTrainer(

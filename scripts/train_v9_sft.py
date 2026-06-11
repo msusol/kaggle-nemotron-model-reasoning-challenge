@@ -439,6 +439,21 @@ def main():
         stratified_order=strat_order,
     )
 
+    # ── pre-training memory flush ────────────────────────────────────────────────
+    # Safetensors mmap pages re-accumulate during the ~14s tokenization pass after
+    # the model-load dropper stops. Flush here so the first 7680-token forward
+    # pass has clean headroom. Same rationale as the post-load dropper.
+    import gc as _gc
+    _gc.collect()
+    torch.cuda.empty_cache()
+    try:
+        with open("/proc/sys/vm/drop_caches", "w") as _fh:
+            _fh.write("3\n")
+    except OSError:
+        pass
+    _free_pre = torch.cuda.mem_get_info()[0] / 1e9
+    print(f"Pre-training flush: GPU free={_free_pre:.1f}GB", flush=True)
+
     # ── train ───────────────────────────────────────────────────────────────────
     print("Starting training...", flush=True)
     trainer.train()

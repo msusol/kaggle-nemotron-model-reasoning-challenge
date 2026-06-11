@@ -112,6 +112,30 @@ from nemo_rl.models.policy.utils import (  # noqa: E402
     get_megatron_checkpoint_dir,
 )
 
+# ---------------------------------------------------------------------------
+# 2b. Patch AutoBridge.save_megatron_model to free the HF model (~60 GB CPU
+#     RAM) before the GPU->CPU save copy (~54 GB). Without this, both are
+#     resident simultaneously (~114 GB), which exceeds the GB10's 121 GB and
+#     causes the kernel to either OOM-kill the container or thrash into a
+#     system freeze. The save method does not use self.hf_pretrained at all,
+#     so nulling it is safe.
+# ---------------------------------------------------------------------------
+from megatron.bridge.models.conversion.auto_bridge import AutoBridge as _AutoBridge  # noqa: E402
+
+_orig_save_megatron_model = _AutoBridge.save_megatron_model
+
+
+def _save_megatron_model_with_hf_free(self, model, path, hf_tokenizer_path=None):
+    import gc as _gc
+    self.hf_pretrained = None
+    _gc.collect()
+    torch.cuda.empty_cache()
+    print("[convert] HF model freed before save — peak CPU RAM now ~54 GB")
+    _orig_save_megatron_model(self, model, path, hf_tokenizer_path=hf_tokenizer_path)
+
+
+_AutoBridge.save_megatron_model = _save_megatron_model_with_hf_free
+
 
 def _human(n_bytes: int) -> str:
     for unit in ("B", "KB", "MB", "GB", "TB"):

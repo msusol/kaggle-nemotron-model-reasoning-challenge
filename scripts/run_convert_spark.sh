@@ -31,6 +31,7 @@ if [[ -f "${WORKSPACE}/.env" ]]; then
 fi
 
 FORCE="${FORCE:-0}"
+_ORIG_OOM_KILL_ALLOCATING=$(cat /proc/sys/vm/oom_kill_allocating_task 2>/dev/null || echo 0)
 SWAP_GB="${SWAP_GB:-100}"
 # Containment: cap the container's cgroup memory and make the container the
 # PREFERRED OOM victim, so a save overrun kills the container (exit 137) instead
@@ -38,7 +39,7 @@ SWAP_GB="${SWAP_GB:-100}"
 # CONTAINER_MEM leaves headroom for host services on the 121 GB box.
 # CONTAINER_MEMSWAP = CONTAINER_MEM + container-visible swap (must be >= mem).
 CONTAINER_MEM="${CONTAINER_MEM:-112g}"
-CONTAINER_MEMSWAP="${CONTAINER_MEMSWAP:-212g}"
+CONTAINER_MEMSWAP="${CONTAINER_MEMSWAP:-150g}"
 CONFIG_PATH="${CONFIG_PATH:-/workspace/docs/plans/lora-grpo-spark-plan/04-lora-grpo-config.yaml}"
 LOG_FILE="${WORKSPACE}/output/convert_$(date +%Y%m%d_%H%M%S).log"
 RUN_NAME="convert_$(date +%Y%m%d_%H%M%S)"
@@ -80,7 +81,7 @@ _cleanup() {
     'echo 45166 > /proc/sys/vm/min_free_kbytes \
      && echo 100 > /proc/sys/vm/vfs_cache_pressure \
      && echo 60 > /proc/sys/vm/swappiness \
-     && echo 0 > /proc/sys/vm/oom_kill_allocating_task' \
+     && echo ${_ORIG_OOM_KILL_ALLOCATING} > /proc/sys/vm/oom_kill_allocating_task' \
     2>/dev/null || true
 
   bash "${SCRIPT_DIR}/services.sh" resume 2>/dev/null || true

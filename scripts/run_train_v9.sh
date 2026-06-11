@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # Run train_v9_sft.py inside the nemotron-gb10 container.
-# Trains from base model (no warmstart), 1000 steps, Format 4, all 14 categories.
+# Format 4 SFT — supports warmstart and configurable data file.
 #
 # Usage (always inside a tmux session):
 #   tmux new -s train_v9
-#   RUN_NAME=v9_sft bash scripts/run_train_v9.sh
+#   RUN_NAME=v12_spark \
+#   TRAIN_FILE=/workspace/data/v0.12_train.jsonl \
+#   WARMSTART_ADAPTER=/workspace/warmstart \
+#   MIN_SEQ_LENGTH=2048 \
+#   MAX_SEQ_LENGTH=8192 \
+#   MAX_STEPS=600 \
+#   LEARNING_RATE=1e-4 \
+#   bash scripts/run_train_v9.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,14 +22,25 @@ if [[ -f "${WORKSPACE}/.env" ]]; then
 fi
 
 RUN_NAME="${RUN_NAME:-v9_$(date +%Y%m%d_%H%M%S)}"
+TRAIN_FILE="${TRAIN_FILE:-/workspace/data/v0.9_train.jsonl}"
+WARMSTART_ADAPTER="${WARMSTART_ADAPTER:-}"
+MIN_SEQ_LENGTH="${MIN_SEQ_LENGTH:-0}"
 MAX_SEQ_LENGTH="${MAX_SEQ_LENGTH:-2048}"
+MAX_STEPS="${MAX_STEPS:-1000}"
+LEARNING_RATE="${LEARNING_RATE:-2e-4}"
 ADAPTER_OUT="/workspace/output/adapter_${RUN_NAME}"
 LOG_FILE="${WORKSPACE}/output/train_${RUN_NAME}.log"
 mkdir -p "${WORKSPACE}/output"
 
-echo "RUN_NAME:    ${RUN_NAME}"
-echo "Adapter out: ${ADAPTER_OUT}"
-echo "Log:         ${LOG_FILE}"
+echo "RUN_NAME:         ${RUN_NAME}"
+echo "TRAIN_FILE:       ${TRAIN_FILE}"
+echo "WARMSTART:        ${WARMSTART_ADAPTER:-none}"
+echo "MIN_SEQ_LENGTH:   ${MIN_SEQ_LENGTH}"
+echo "MAX_SEQ_LENGTH:   ${MAX_SEQ_LENGTH}"
+echo "MAX_STEPS:        ${MAX_STEPS}"
+echo "LEARNING_RATE:    ${LEARNING_RATE}"
+echo "Adapter out:      ${ADAPTER_OUT}"
+echo "Log:              ${LOG_FILE}"
 
 # ── stop gnome-remote-desktop (~6 GB GPU freed) ────────────────────────────────
 systemctl --user stop gnome-remote-desktop.service 2>/dev/null || true
@@ -137,17 +155,19 @@ ionice -c 2 -n 7 docker run --privileged \
   -w /workspace \
   nemotron-gb10:latest \
   python scripts/train_v9_sft.py \
-    --train-file     /workspace/data/v0.9_train.jsonl \
+    --train-file     "${TRAIN_FILE}" \
     --output-dir     "${ADAPTER_OUT}" \
     --model-id       nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 \
-    --max-steps      1000 \
-    --learning-rate  2e-4 \
+    --max-steps      "${MAX_STEPS}" \
+    --learning-rate  "${LEARNING_RATE}" \
+    --min-seq-length "${MIN_SEQ_LENGTH}" \
     --max-seq-length "${MAX_SEQ_LENGTH}" \
     --batch-size     1 \
     --grad-accum     16 \
     --lora-r         32 \
     --lora-alpha     32 \
     --seed           3407 \
+    ${WARMSTART_ADAPTER:+--warmstart-adapter "${WARMSTART_ADAPTER}"} \
   2>&1 | tee "${LOG_FILE}"
 TRAIN_EXIT=${PIPESTATUS[0]}
 set -e

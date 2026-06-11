@@ -66,6 +66,40 @@ the competition **test set has 14 problem categories**, but the training CSV onl
 Any model trained solely on `train.csv` data scores 0% on the 8 unseen test categories, which
 together represent the majority of the evaluation set.
 
+### v0.9 — Format 4 SFT two-run curriculum (current)
+
+v0.9 is the active training track on GB10. It combines the huikang + kishanvavdara corpora
+into **Format 4** (correct `<think>…</think>\boxed{}` structure) and uses a two-run
+curriculum that mirrors the Kaggle notebook strategy:
+
+| Run | `MAX_SEQ_LENGTH` | `MIN_SEQ_LENGTH` | Warmstart | Examples |
+|-----|-----------------|-----------------|-----------|----------|
+| run9 | 4096 | 0 | None (base model) | 7,966 (≤4096 tok) |
+| run10 | 7680 | 4096 | run9 adapter | 13,394 (4096–7680 tok) |
+
+**GB10 compatibility notes** (see `docs/investigate/v0.9-run8-oom-and-run9-fixes.md`):
+
+- **Kaggle adapters cannot warmstart on GB10**: Adapters from the Kaggle RTX Pro 6000
+  run (saved with `peft_version="0.18.1"`) are missing 92 of 232 expected Mamba SSM
+  keys (`in_proj`/`out_proj` for all 23 layers). PEFT randomly initializes missing keys
+  instead of raising an error, producing an inconsistent 883M-param adapter. Always start
+  from the base model on GB10 for the first run of any new target-module set.
+
+- **Gradient checkpointing workaround**: `NemotronHForCausalLM.supports_gradient_checkpointing=False`
+  blocks the standard `gradient_checkpointing_enable()` path. Native GC is enabled via
+  `NemotronHModel._set_gradient_checkpointing()` before training, then
+  `model.gradient_checkpointing_enable` is replaced with a no-op so SFTTrainer doesn't
+  re-raise the `ValueError`. Without GC, all 128 MoE expert activations live in CUDA
+  memory simultaneously → OOM at step 0.
+
+- **`padding_free` kwarg**: The Kaggle Unsloth build patches `SFTConfig` to accept
+  `padding_free`; the DGX build does not. The kwarg must be absent; Unsloth on DGX
+  auto-enables padding-free when supported.
+
+Run9 status (2026-06-10): training at ~32 s/step, loss=0.75 at step 10, ~4.5h total.
+
+See [`docs/plans/v0.9-plan.md`](docs/plans/v0.9-plan.md) for the full plan.
+
 ### v0.4 — SFT on the huikang corpus
 
 The `samvalladares/huikang-nemotron-artifacts` public dataset contains 15,979 pre-tokenized
@@ -101,7 +135,9 @@ Key GRPO requirements already satisfied by our stack:
 - `transformers==5.5.3` native Nemotron-H implementation fixes the KV cache name mismatch
   (`past_key_values` vs `cache_params`) that causes 20× slowdown without the fix [cite:145]
 - No `trust_remote_code=True` — uses the fixed built-in implementation
-- `gradient_checkpointing=False` — `NemotronHForCausalLM` does not implement `gradient_checkpointing_enable()`; SFT at `seq=8192` fits the 130 GB unified pool without it
+- Gradient checkpointing via `NemotronHModel._set_gradient_checkpointing()` (native
+  `GradientCheckpointingLayer` path); `gradient_checkpointing_enable()` is no-op'd on the
+  instance because `supports_gradient_checkpointing=False` would raise `ValueError`
 
 See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full plan.
 
@@ -113,7 +149,7 @@ See [`docs/plans/v0.5-grpo-plan.md`](docs/plans/v0.5-grpo-plan.md) for the full 
 ├── .gitignore
 ├── CLAUDE.md
 ├── README.md
-├── Dockerfile.gb10                      # primary build (26.04-py3)
+├── Dockerfile.gb10                      # primary build (26.05-py3)
 ├── Dockerfile.vllm-gb10                 # vLLM serving image — CoT generation + GRPO inference
 ├── .clinerules/                         # 18 rules (framework 01-12, project-specific 13-18)
 ├── configs/
@@ -338,23 +374,36 @@ bash scripts/package_submission.sh output/adapter_cot_vX_YYYYMMDD_HHMMSS output/
 # → output/submission/submission.zip
 ```
 
-### 7. v0.9 training (Format 4, 14 categories, base model)
+### 7. v0.9 training (Format 4, 16 categories, two-run curriculum)
 
-Generate the v0.9 dataset from huikang + kishanvavdara, then run SFT:
+Generate the v0.9 dataset from huikang + kishanvavdara, then run the two-pass SFT
+curriculum on GB10. See `docs/investigate/v0.9-run8-oom-and-run9-fixes.md` for the
+full compatibility notes before running.
 
 ```bash
-# Build v0.9_train.jsonl + v0.9_valid.jsonl (18,603 + 979 examples, Format 4, 14 categories)
+# Build v0.9_train.jsonl + v0.9_valid.jsonl (13,730 + ~975 examples, Format 4, 16 categories)
 python scripts/prepare_v09_data.py \
   --huikang   data/v0.4_train.jsonl \
   --kv-csv    ~/.cache/kagglehub/datasets/kishanvavdara/nemotron-reasoning-traj/versions/1/nemotron_traj.csv \
   --out-train data/v0.9_train.jsonl \
   --out-valid data/v0.9_valid.jsonl
 
-# SFT training — run inside tmux
+# Run 9 — short examples ≤4096 tokens, fresh from base model (no warmstart)
+# Always start fresh on GB10: Kaggle adapters are missing 92 Mamba keys and cannot warmstart
 tmux new -s train_v9
-RUN_NAME=v9_sft bash scripts/run_train_v9.sh
-# → output/train_v9_sft_YYYYMMDD_HHMMSS.log
-# → output/adapter_v9_sft_YYYYMMDD_HHMMSS/
+MAX_SEQ_LENGTH=4096 RUN_NAME=v9_run9 bash scripts/run_train_v9.sh
+# → output/train_v9_run9_YYYYMMDD_HHMMSS.log
+# → output/adapter_v9_run9_YYYYMMDD_HHMMSS/
+# → output/adapter_v9_run9_YYYYMMDD_HHMMSS_ckpt/  (checkpoint every 50 steps)
+
+# After run9 completes: copy adapter to warmstart/
+cp -r output/adapter_v9_run9_*/ warmstart/
+
+# Run 10 — longer examples 4096–7680 tokens, warmstarted from run9
+MAX_SEQ_LENGTH=7680 MIN_SEQ_LENGTH=4096 WARMSTART_ADAPTER=warmstart RUN_NAME=v9_run10 \
+  bash scripts/run_train_v9.sh
+# → output/train_v9_run10_YYYYMMDD_HHMMSS.log
+# → output/adapter_v9_run10_YYYYMMDD_HHMMSS/
 ```
 
 ### 8. Submit to Kaggle
@@ -415,7 +464,9 @@ See [`docs/plans/leaderboard.md`](docs/plans/leaderboard.md) for the full run hi
 | v0.3-filtered | Correctness-filtered CoT (kishanvavdara) | — | 0.50 — test set has 14 categories, training covered only 6 |
 | v0.4-huikang-r1 | Huikang corpus, 15,979 problems, seq=8192 | — | 0.49 — system prompt mismatch |
 | v0.4-huikang-r2 | + system prompt fix | — | 0.50 — system/augmenter contradiction (53% of test scored 0) |
-| v0.4-huikang-r3 | + empty system + stripped placeholder | — | *in progress* |
+| v0.4-huikang-r3 | + empty system + stripped placeholder | — | 0.85 (Kaggle run, Format 4 confirmed) |
+| v0.9-run9 | Format 4, huikang+kv, 7,966 ex ≤4096 tok, GB10 fresh | — | *in progress (~4.5h)* |
+| v0.9-run10 | Format 4, 13,394 ex 4096–7680 tok, warmstart run9 | — | *pending run9* |
 
 ![Training comparison v0.1-baseline vs v0.2-cot](docs/images/training_comparison_v01_v02.png)
 ![v0.3 training curves](docs/images/training_v03.png)

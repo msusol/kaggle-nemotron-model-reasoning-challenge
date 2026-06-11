@@ -249,6 +249,12 @@ def main():
         )
         model.enable_input_require_grads()
         print("Gradient checkpointing enabled (NemotronH native, use_reentrant=False)", flush=True)
+        # Trainer.train() calls model.gradient_checkpointing_enable() when
+        # SFTConfig(gradient_checkpointing=True). NemotronH raises ValueError
+        # ("does not support gradient checkpointing") via supports_gradient_checkpointing=False.
+        # Native GC is already active above; make the standard path a no-op so Unsloth's
+        # wrapper keeps GC enabled without crashing.
+        model.gradient_checkpointing_enable = lambda **kwargs: None
     except Exception as _e:
         print(f"Warning: gradient checkpointing unavailable: {_e}", flush=True)
 

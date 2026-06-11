@@ -247,7 +247,7 @@ def main() -> None:
     )
     ap.add_argument(
         "--existing",
-        default="data/v0.5_train.jsonl",
+        default="data/v0.9_train.jsonl",
         help="Existing JSONL to deduplicate against (default: %(default)s)",
     )
     ap.add_argument(

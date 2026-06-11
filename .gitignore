@@ -18,6 +18,8 @@ data/v0.1_train.csv
 data/v0.5_train.jsonl
 data/v0.9_train.jsonl
 data/v0.9_valid.jsonl
+data/v0.12_augmented.jsonl
+data/v0.12_train.jsonl
 unsloth_compiled_cache/
 adapters/**/*.safetensors
 adapters/**/*.json.bak

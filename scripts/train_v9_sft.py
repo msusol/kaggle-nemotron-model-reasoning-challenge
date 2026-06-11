@@ -17,10 +17,23 @@ Usage (via run_train_v9.sh):
         --output-dir /workspace/output/adapter_v9_YYYYMMDD_HHMMSS
 """
 
+import contextlib as _contextlib, io as _io, builtins as _builtins
+
+# Unsloth prints GRPO-patching noise on every import regardless of trainer type.
+# Filter those lines; let everything else through so the Unsloth banner is visible.
+_UNSLOTH_SUPPRESS = {"Could not find `steps_per_generation`",
+                     "Could not find `generation_batch_size`"}
+_real_print = _builtins.print
+def _filtered_print(*a, **kw):
+    if not any(s in str(a) for s in _UNSLOTH_SUPPRESS):
+        _real_print(*a, **kw)
+_builtins.print = _filtered_print
 try:
     import unsloth  # must precede trl/transformers/peft to apply all optimizations
 except ImportError:
     pass
+finally:
+    _builtins.print = _real_print
 
 import argparse
 import sys
@@ -427,7 +440,6 @@ def main():
         seed=args.seed,
         report_to="none",
         packing=False,
-        padding_free=False,             # prevent Unsloth auto-enabling padding_free, which bypasses stratified sampler
     )
 
     trainer = StratifiedSFTTrainer(

@@ -126,10 +126,10 @@ _orig_save_megatron_model = _AutoBridge.save_megatron_model
 
 
 def _save_megatron_model_with_hf_free(self, model, path, hf_tokenizer_path=None):
-    import gc as _gc
+    # Null the HF model reference — Python refcounting frees it immediately
+    # (~60 GB CPU RAM). Do NOT call gc.collect() or torch.cuda.empty_cache()
+    # here: both can interact with active NCCL streams and cause a watchdog hang.
     self.hf_pretrained = None
-    _gc.collect()
-    torch.cuda.empty_cache()
     print("[convert] HF model freed before save — peak CPU RAM now ~54 GB")
     _orig_save_megatron_model(self, model, path, hf_tokenizer_path=hf_tokenizer_path)
 

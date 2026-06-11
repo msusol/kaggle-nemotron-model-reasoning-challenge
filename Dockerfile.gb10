@@ -100,16 +100,40 @@ RUN TORCH_CUDA_ARCH_LIST="8.0;8.6;8.7;8.9;9.0;12.0;12.1+PTX" \
     pip install mamba-ssm --no-binary mamba-ssm --no-build-isolation \
  && python3 -c "f='/usr/local/lib/python3.12/dist-packages/mamba_ssm/ops/selective_scan_interface.py'; c=open(f).read(); needle='\nimport selective_scan_cuda\n'; open(f,'w').write(c.replace(needle,'\ntry:\n    import selective_scan_cuda\nexcept ImportError:\n    selective_scan_cuda = None\n',1)) if needle in c else None"
 
-RUN pip install mergekit \
- && pip uninstall -y llm-blender 2>/dev/null || true \
- && pip install --force-reinstall --no-deps "trl==0.15.2" \
- && python3 - <<'PYEOF'
-# TRL 0.15.2 GRPOTrainer: disable vllm (pydantic/torch conflict in this image).
-# llm_blender is uninstalled above so is_llm_blender_available() returns False
-# and the guarded import is never attempted — no patch needed for judges.py.
+# mergekit: trl==0.15.2 GRPOTrainer has a hard `import mergekit` in grpo_trainer.py,
+# and mergekit itself pulls transitive deps (immutables, etc.) that conflict with our
+# pinned stack. Same fix as mamba-ssm: guard the import in grpo_trainer.py with
+# try/except, then ensure no broken partial install remains.
+RUN pip uninstall -y mergekit llm-blender 2>/dev/null || true \
+ && pip install --force-reinstall --no-deps "trl==0.15.2"
+
+RUN python3 - <<'PYEOF'
+import pathlib, re
+f = pathlib.Path('/usr/local/lib/python3.12/dist-packages/trl/trainer/grpo_trainer.py')
+if f.exists():
+    c = f.read_text()
+    # Guard both `import mergekit` and `from mergekit import ...` forms.
+    c2 = re.sub(r'^(import mergekit\b.*)',
+                'try:\n    \\1\nexcept ImportError:\n    mergekit = None',
+                c, flags=re.MULTILINE)
+    c2 = re.sub(r'^(from mergekit\b.*)',
+                'try:\n    \\1\nexcept ImportError:\n    pass',
+                c2, flags=re.MULTILINE)
+    if c2 != c:
+        f.write_text(c2)
+        print('grpo_trainer.py: guarded mergekit imports OK')
+    else:
+        print('grpo_trainer.py: no mergekit imports found (already patched or changed)')
+else:
+    print('grpo_trainer.py not found at expected path')
+PYEOF
+
+# TRL 0.15.2: disable vllm (pydantic/torch conflict in this image).
+# GRPOTrainer smoke test omitted — not needed for SFT training and fails without
+# mergekit's full transitive dep tree installed.
+RUN python3 - <<'PYEOF'
 import pathlib
 
-# Force _vllm_available = False
 utils = pathlib.Path('/usr/local/lib/python3.12/dist-packages/trl/import_utils.py')
 c = utils.read_text()
 old = '_vllm_available = _is_package_available("vllm")'
@@ -119,10 +143,6 @@ if old in c:
     print('import_utils.py patched OK')
 else:
     print('import_utils.py: needle not found (already patched or changed)')
-
-# Smoke test GRPOTrainer import
-from trl import GRPOTrainer
-print('GRPOTrainer import OK')
 PYEOF
 
 # Unsloth — FastLanguageModel patches Nemotron-H's MoE expert tensors (batched

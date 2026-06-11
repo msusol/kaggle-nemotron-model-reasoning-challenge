@@ -321,6 +321,14 @@ Replaces v0.10 on DGX Spark — vLLM sidecar is infeasible (OOM); uses Megatron 
 3. Full GRPO run: `RUN_NAME=grpo_v11 bash scripts/run_nemo_grpo_spark.sh`
 4. Export via `convert_lora_to_hf.py`; validate and submit
 
+### v0.12-reasoner-data-spark-sft.md
+1. Download `huikang/huikang-nemotron-repository-snapshot` → verify augmenter API
+2. Write and run `scripts/generate_reasoner_data.py` → `data/v0.12_augmented.jsonl` (~12,000 new examples for under-represented cats)
+3. Mix with `data/v0.9_grpo_train.jsonl` → `data/v0.12_train.jsonl`
+4. Download best Kaggle warmstart (run7 or run4) to Spark
+5. Train on DGX Spark: `train_v9_sft.py --warmstart-adapter ... --max-seq-length 8192 --max-steps 600`
+6. Package and submit; update leaderboard
+
 ## Infrastructure (complete)
 - [x] `Dockerfile.gb10` (26.04) — current primary image for all training runs
 - [x] `transformers==5.5.3` — native NemotronH KV cache fix, no `trust_remote_code`

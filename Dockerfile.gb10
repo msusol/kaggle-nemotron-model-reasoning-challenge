@@ -2,9 +2,13 @@
 #
 # Key differences from 26.04:
 #   - Base image: nvcr.io/nvidia/pytorch:26.05-py3  (was 26.04)
-#   - Expect torch.version.cuda to align with CUDA 13.x toolkit (was 12.1 in 26.04,
-#     causing torch.version.cuda="12.1" vs toolkit 13.2 — mismatched CUDA runtimes
-#     for SM 12.0/Blackwell JIT compilation paths in PyTorch native CUDA kernels)
+#   - Container CUDA toolkit: 13.2.1 (same as 26.04 — both use CUDA 13.2.1.009)
+#   - torch.version.cuda: likely still "12.1" — PyTorch in NGC containers is compiled
+#     against CUDA 12.1 by design for broad GPU compatibility. The toolkit version and
+#     the PyTorch build CUDA are deliberately decoupled. Our JIT-compiled extensions
+#     (causal-conv1d, mamba-ssm, bitsandbytes) use nvcc 13.2 with SM 12.0 targets and
+#     are unaffected. PyTorch built-in kernels fall back to PTX on SM 12.0 (correct,
+#     slightly slower). Watch NGC release notes for when torch.version.cuda bumps to 13.x.
 #   - Verify Python version after pull (26.05 may ship 3.13 instead of 3.12 — update
 #     lib path strings in the RUN python3 patch steps below if so)
 #   - All Python package pins unchanged from 26.04 until verified

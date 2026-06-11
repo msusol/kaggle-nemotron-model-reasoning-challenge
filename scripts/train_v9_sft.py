@@ -72,6 +72,9 @@ def parse_args():
     ap.add_argument("--lora-alpha",      type=int,   default=32)
     ap.add_argument("--lora-dropout",    type=float, default=0.0)
     ap.add_argument("--seed",            type=int,   default=3407)
+    ap.add_argument("--ckpt-every",      type=int,   default=50,
+                    help="Save adapter checkpoint every N steps to <output_dir>_ckpt. "
+                         "Overwrites same path each time (constant disk use). 0 = disabled.")
     return ap.parse_args()
 
 
@@ -456,6 +459,23 @@ def main():
         formatting_func=formatting_func,
         stratified_order=strat_order,
     )
+
+    # ── periodic checkpoint callback ─────────────────────────────────────────────
+    # Saves adapter every --ckpt-every optimizer steps so a kill mid-training
+    # doesn't lose all work. Overwrites the same _ckpt path (constant disk use).
+    if args.ckpt_every > 0:
+        from transformers import TrainerCallback, TrainerState, TrainerControl
+        _ckpt_dir = args.output_dir + "_ckpt"
+
+        class _PeriodicAdapterSave(TrainerCallback):
+            def on_step_end(self, ta, state: TrainerState, control: TrainerControl, **kw):
+                if state.global_step > 0 and state.global_step % args.ckpt_every == 0:
+                    model.save_pretrained(_ckpt_dir)
+                    print(f"[ckpt] step {state.global_step} → {_ckpt_dir}", flush=True)
+                return control
+
+        trainer.add_callback(_PeriodicAdapterSave())
+        print(f"PeriodicAdapterSave: every {args.ckpt_every} steps → {_ckpt_dir}", flush=True)
 
     # ── pre-training memory flush ────────────────────────────────────────────────
     # Safetensors mmap pages re-accumulate during the ~14s tokenization pass after

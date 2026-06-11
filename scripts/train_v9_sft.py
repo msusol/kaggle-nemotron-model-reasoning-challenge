@@ -75,6 +75,10 @@ def parse_args():
     ap.add_argument("--ckpt-every",      type=int,   default=50,
                     help="Save adapter checkpoint every N steps to <output_dir>_ckpt. "
                          "Overwrites same path each time (constant disk use). 0 = disabled.")
+    ap.add_argument("--resume-from-checkpoint", default=None,
+                    help="Path to a Trainer checkpoint dir (e.g. /workspace/output/adapter_v9_run12/checkpoint-500). "
+                         "Resumes optimizer, scheduler, step count, and expert LoRA state. "
+                         "Trainer auto-detects latest checkpoint if set to 'true'.")
     return ap.parse_args()
 
 
@@ -195,53 +199,141 @@ def main():
     # Explicit names bypass that check and let Unsloth apply its full memory opts
     # (gradient offloading, etc.) which are only active when _lora_via_unsloth=True.
     _LORA_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj",
-                     "gate_proj", "up_proj", "down_proj", "in_proj", "out_proj"]
+                     "gate_proj", "up_proj", "down_proj", "in_proj"]
+    # out_proj excluded: Unsloth Mamba fast-path bypasses PEFT wrapper → zero gradient,
+    # lora_B stays exactly zero throughout training. See docs/investigate/mamba-out-proj-lora-dead-path.md
 
+    # ── Step 2a: inject per-expert LoRA (before peft wrapping) ──────────────────────
+    # NemotronHExperts.forward uses self.up_proj[expert_idx] — per-expert tensor
+    # indexing. Replacing up_proj with a peft ParamWrapper module breaks this.
+    # Fix: add lora_A_up/down + lora_B_up/down as nn.Parameters directly on each
+    # NemotronHExperts module. Because peft's _mark_only_adapters_as_trainable keeps
+    # any param whose name contains "lora_" trainable, these survive the freeze pass.
+    # Then patch NemotronHExperts.forward to add the LoRA contribution per-expert
+    # inside the existing expert-iteration loop.
+    _n_expert_lora = 0
+    _expert_lora_r = args.lora_r
+    _expert_lora_scaling = args.lora_alpha / args.lora_r
+
+    if _unsloth_loaded and not args.warmstart_adapter:
+        import math as _math
+        import torch.nn as _nn_lora
+        try:
+            import transformers.models.nemotron_h.modeling_nemotron_h as _nh_mod
+            _orig_experts_fwd = _nh_mod.NemotronHExperts.forward
+            _n_injected = 0
+
+            for _mn_ei, _m_ei in model.named_modules():
+                if not isinstance(_m_ei, _nh_mod.NemotronHExperts):
+                    continue
+                # up_proj [E, out=1856, in=2688], down_proj [E, out=2688, in=1856]
+                _E,  _out_up,   _in_up   = _m_ei.up_proj.shape
+                _E2, _out_down, _in_down = _m_ei.down_proj.shape
+                _dev_ei = _m_ei.up_proj.device
+                _dt_ei  = _m_ei.up_proj.dtype
+
+                _m_ei.up_proj.requires_grad_(False)
+                _m_ei.down_proj.requires_grad_(False)
+
+                # lora_A_up  [E, r, in_up]  — A init kaiming, B init zeros → zero delta at start
+                # lora_B_up  [E, out_up, r]
+                _A_up = torch.empty(_E, _expert_lora_r, _in_up, dtype=_dt_ei, device=_dev_ei)
+                _B_up = torch.zeros(_E, _out_up, _expert_lora_r, dtype=_dt_ei, device=_dev_ei)
+                _nn_lora.init.kaiming_uniform_(
+                    _A_up.view(_E * _expert_lora_r, _in_up), a=_math.sqrt(5))
+                _m_ei.lora_A_up = _nn_lora.Parameter(_A_up)
+                _m_ei.lora_B_up = _nn_lora.Parameter(_B_up)
+
+                _A_down = torch.empty(_E, _expert_lora_r, _in_down, dtype=_dt_ei, device=_dev_ei)
+                _B_down = torch.zeros(_E, _out_down, _expert_lora_r, dtype=_dt_ei, device=_dev_ei)
+                _nn_lora.init.kaiming_uniform_(
+                    _A_down.view(_E * _expert_lora_r, _in_down), a=_math.sqrt(5))
+                _m_ei.lora_A_down = _nn_lora.Parameter(_A_down)
+                _m_ei.lora_B_down = _nn_lora.Parameter(_B_down)
+
+                _m_ei._moe_lora_scaling = _expert_lora_scaling
+                _n_injected += 1
+
+            if _n_injected > 0:
+                import torch.nn.functional as _F_moe
+
+                def _lora_experts_forward(
+                    self,
+                    hidden_states: torch.Tensor,
+                    top_k_index: torch.Tensor,
+                    top_k_weights: torch.Tensor,
+                    _orig=_orig_experts_fwd,
+                ):
+                    if not hasattr(self, "lora_A_up"):
+                        return _orig(self, hidden_states, top_k_index, top_k_weights)
+                    final_hidden_states = torch.zeros_like(
+                        hidden_states, dtype=top_k_weights.dtype)
+                    with torch.no_grad():
+                        expert_mask = _F_moe.one_hot(
+                            top_k_index, num_classes=self.num_experts)
+                        expert_mask = expert_mask.permute(2, 1, 0)
+                        expert_hit = torch.greater(
+                            expert_mask.sum(dim=(-1, -2)), 0
+                        ).nonzero().squeeze(-1)
+                    s = self._moe_lora_scaling
+                    for expert_idx in expert_hit:
+                        expert_idx = expert_idx.item()
+                        top_k_pos, token_idx = torch.where(expert_mask[expert_idx])
+                        if token_idx.numel() == 0:
+                            continue
+                        current_state = hidden_states[token_idx]
+
+                        up_base = _F_moe.linear(current_state, self.up_proj[expert_idx])
+                        up_lora = _F_moe.linear(
+                            _F_moe.linear(current_state, self.lora_A_up[expert_idx]),
+                            self.lora_B_up[expert_idx]) * s
+                        current_hidden_states = self.act_fn(up_base + up_lora)
+
+                        down_base = _F_moe.linear(
+                            current_hidden_states, self.down_proj[expert_idx])
+                        down_lora = _F_moe.linear(
+                            _F_moe.linear(
+                                current_hidden_states, self.lora_A_down[expert_idx]),
+                            self.lora_B_down[expert_idx]) * s
+                        current_hidden_states = down_base + down_lora
+
+                        current_hidden_states = (
+                            current_hidden_states
+                            * top_k_weights[token_idx, top_k_pos, None]
+                        )
+                        final_hidden_states.index_add_(
+                            0, token_idx,
+                            current_hidden_states.to(final_hidden_states.dtype),
+                        )
+                    return final_hidden_states.to(hidden_states.dtype)
+
+                _nh_mod.NemotronHExperts.forward = _lora_experts_forward
+                _n_expert_lora = _n_injected
+                print(
+                    f"[moe-lora] Injected per-expert LoRA into {_n_expert_lora} "
+                    f"NemotronHExperts modules, r={_expert_lora_r}, "
+                    f"scaling={_expert_lora_scaling:.3f}",
+                    flush=True,
+                )
+        except Exception as _ex_ei:
+            import traceback as _tb_ei
+            print(f"[moe-lora] WARNING: expert LoRA injection failed ({_ex_ei})", flush=True)
+            _tb_ei.print_exc()
+
+    # ── Step 2b: apply attention/MLP LoRA via FastLanguageModel ───────────────────
     if args.warmstart_adapter:
-        # Load a completed adapter and continue training it on the new data slice.
-        # The Unsloth-patched model already has MoE experts accessible; PeftModel
-        # simply re-attaches the existing LoRA A/B weights as trainable parameters.
         from peft import PeftModel
         print(f"Warmstart: loading adapter from {args.warmstart_adapter}", flush=True)
         model = PeftModel.from_pretrained(model, args.warmstart_adapter, is_trainable=True)
-        _lora_via_unsloth = _unsloth_loaded  # base is still Unsloth-patched
+        _lora_via_unsloth = _unsloth_loaded
         print("Adapter loaded and set to trainable (warmstart mode)", flush=True)
     elif _unsloth_loaded:
-        # ── per-expert MoE LoRA patch ─────────────────────────────────────────────
-        # Unsloth's moe_utils.py only activates the per-expert batched LoRA path
-        # (ParamWrapper lora_A shape [E*r, in_dim]) for models with
-        # model_type="gpt_oss" and experts class named "GptOssExperts".
-        # NemotronH uses model_type="nemotron_h" / class NemotronHExperts — both
-        # checks fail, so DGX Unsloth falls back to scalar shared LoRA (~27M params
-        # instead of ~455M) that trains no per-expert specialisation.
-        # The Kaggle notebook avoids this via trust_remote_code=True which loads
-        # NVIDIA's hub custom code (model_type="gpt_oss", GptOssExperts class).
-        # Fix: temporarily rename and restore around get_peft_model so the existing
-        # Unsloth machinery fires.  Then explicitly call patch_gpt_oss_grouped_mm_format
-        # to set _unsloth_grouped_mm_format=True on all expert modules (needed for
-        # the separated grouped-GEMM LoRA forward pass).
-        # Rename NemotronHExperts → GptOssExperts and model_type → gpt_oss so that
-        # Unsloth's patched peft.get_peft_model triggers the per-expert batched LoRA
-        # initialisation path (ParamWrapper lora_A shape [E*r, in_dim] = [4096, 2688]).
-        _nh_experts_cls = None
-        _orig_cls_name  = ""
-        _orig_qualname  = ""
-        _orig_model_type = ""
+        # Monkey-patch get_moe_target_parameters → [] so FastLanguageModel.get_peft_model
+        # does NOT create peft ParamWrapper for the expert 3D params handled above.
         try:
-            import transformers.models.nemotron_h.modeling_nemotron_h as _nh_mod
-            _nh_experts_cls  = _nh_mod.NemotronHExperts
-            _orig_cls_name   = _nh_experts_cls.__name__
-            _orig_qualname   = _nh_experts_cls.__qualname__
-            _orig_model_type = getattr(model.config, "model_type", "nemotron_h")
-            _nh_experts_cls.__name__    = "GptOssExperts"
-            _nh_experts_cls.__qualname__ = "GptOssExperts"
-            object.__setattr__(model.config, "model_type", "gpt_oss")
-            print("[moe-patch] NemotronHExperts renamed → GptOssExperts, model_type → gpt_oss", flush=True)
-        except Exception as _ep:
-            _nh_experts_cls = None
-            print(f"[moe-patch] WARNING: pre-rename failed ({_ep})", flush=True)
-
-        try:
+            import unsloth.models._utils as _u_utils
+            _orig_gmtp = _u_utils.get_moe_target_parameters
+            _u_utils.get_moe_target_parameters = lambda _mdl: []
             model = FastLanguageModel.get_peft_model(
                 model,
                 r=args.lora_r,
@@ -255,45 +347,12 @@ def main():
             print("LoRA initialized via FastLanguageModel.get_peft_model", flush=True)
         except Exception as _e:
             print(f"FastLanguageModel.get_peft_model failed ({_e})", flush=True)
-            print("Falling back to standard PEFT on Unsloth-patched model", flush=True)
+            print("Falling back to standard PEFT", flush=True)
         finally:
-            if _nh_experts_cls is not None:
-                _nh_experts_cls.__name__    = _orig_cls_name
-                _nh_experts_cls.__qualname__ = _orig_qualname
-                object.__setattr__(model.config, "model_type", _orig_model_type)
-
-        # Explicitly set _unsloth_grouped_mm_format=True on all NemotronHExperts
-        # modules so the separated grouped-GEMM LoRA forward path fires during training.
-        try:
-            from unsloth_compiled_cache.moe_utils import patch_gpt_oss_grouped_mm_format as _pgof
-            if _nh_experts_cls is not None:
-                _nh_experts_cls.__name__    = "GptOssExperts"
-                _nh_experts_cls.__qualname__ = "GptOssExperts"
-                object.__setattr__(model.config, "model_type", "gpt_oss")
-            _n_patched = _pgof(model)
-            if _nh_experts_cls is not None:
-                _nh_experts_cls.__name__    = _orig_cls_name
-                _nh_experts_cls.__qualname__ = _orig_qualname
-                object.__setattr__(model.config, "model_type", _orig_model_type)
-            print(f"[moe-patch] grouped_mm flag set on {_n_patched} expert modules", flush=True)
-        except Exception as _ep:
-            print(f"[moe-patch] WARNING: patch_gpt_oss_grouped_mm_format failed ({_ep})", flush=True)
-
-        # Diagnostic: log the first expert module's LoRA shapes to confirm
-        # per-expert ([E*r, in_dim] = [4096, 2688]) vs scalar ([r, in_dim] = [32, 2688]).
-        try:
-            for _mn, _m in model.named_modules():
-                if type(_m).__name__ in ("NemotronHExperts", "GptOssExperts"):
-                    _gu = getattr(_m, "gate_up_proj", None)
-                    if _gu is not None and hasattr(_gu, "lora_A"):
-                        _a = next(iter(_gu.lora_A.values())).weight
-                        _b = next(iter(_gu.lora_B.values())).weight
-                        _per = _a.shape[0] > args.lora_r
-                        print(f"[moe-patch] expert LoRA shapes — lora_A: {list(_a.shape)}  lora_B: {list(_b.shape)}", flush=True)
-                        print(f"[moe-patch] per-expert={'YES ✓' if _per else 'NO — scalar (patch did not activate)'}", flush=True)
-                    break
-        except Exception:
-            pass
+            try:
+                _u_utils.get_moe_target_parameters = _orig_gmtp
+            except Exception:
+                pass
 
     if not _lora_via_unsloth and not args.warmstart_adapter:
         from peft import LoraConfig, get_peft_model as _std_get_peft_model
@@ -306,6 +365,78 @@ def main():
         )
         model = _std_get_peft_model(model, lora_config)
         print("LoRA initialized via PEFT get_peft_model", flush=True)
+
+    # ── Re-enable requires_grad for expert LoRA params frozen by prepare_model_for_training ──
+    # Unsloth's prepare_model_for_training only keeps ".lora_A." / ".lora_B." (exact substrings
+    # with dots on both sides) trainable. Our params are named "lora_A_up", "lora_B_up", etc.
+    # (no trailing dot), so they get silently frozen. Re-enable them here unconditionally.
+    if _n_expert_lora > 0:
+        _regrad_count = 0
+        _expert_lora_param_names = {"lora_A_up", "lora_B_up", "lora_A_down", "lora_B_down"}
+        for _pn, _pp in model.named_parameters():
+            if _pn.rsplit(".", 1)[-1] in _expert_lora_param_names:
+                _pp.requires_grad_(True)
+                _regrad_count += 1
+        print(f"[moe-lora] Re-enabled requires_grad on {_regrad_count} expert LoRA params", flush=True)
+
+    # ── Resume expert LoRA weights from a prior Trainer checkpoint ─────────────────
+    if args.resume_from_checkpoint and args.resume_from_checkpoint.lower() != "true" \
+            and _n_expert_lora > 0:
+        import os as _os_r
+        _elo_resume_path = _os_r.path.join(args.resume_from_checkpoint, "expert_lora_weights.pt")
+        if _os_r.path.exists(_elo_resume_path):
+            _elo_resume = torch.load(_elo_resume_path, map_location="cuda", weights_only=True)
+            _elo_loaded = 0
+            for _mn_r, _m_r in model.named_modules():
+                for _k_r in ("lora_A_up", "lora_B_up", "lora_A_down", "lora_B_down"):
+                    _fk = f"{_mn_r}.{_k_r}"
+                    if _fk in _elo_resume and hasattr(_m_r, _k_r):
+                        _tgt = getattr(_m_r, _k_r)
+                        _tgt.data.copy_(_elo_resume[_fk].to(dtype=_tgt.dtype, device=_tgt.device))
+                        _elo_loaded += 1
+            print(f"[moe-lora] Resumed {_elo_loaded} expert LoRA weights from {_elo_resume_path}", flush=True)
+        else:
+            print(f"[moe-lora] WARNING: resume path set but {_elo_resume_path} not found — using fresh init", flush=True)
+
+    # ── Diagnostic: confirm per-expert LoRA params ────────────────────────────────
+    try:
+        if _n_expert_lora > 0:
+            for _mn_diag, _m_diag in model.named_modules():
+                if hasattr(_m_diag, "lora_A_up"):
+                    print(
+                        f"[moe-lora] first expert LoRA at '{_mn_diag}' — "
+                        f"A_up:{list(_m_diag.lora_A_up.shape)}, "
+                        f"B_up:{list(_m_diag.lora_B_up.shape)}, "
+                        f"A_down:{list(_m_diag.lora_A_down.shape)}, "
+                        f"B_down:{list(_m_diag.lora_B_down.shape)}",
+                        flush=True,
+                    )
+                    break
+        else:
+            print("[moe-lora] No per-expert LoRA injected (standard LoRA only)", flush=True)
+    except Exception:
+        pass
+
+    # ── Expert LoRA save helper ────────────────────────────────────────────────────
+    def _save_expert_lora(output_dir):
+        if _n_expert_lora == 0:
+            return
+        _elo_weights = {}
+        for _elo_name, _elo_mod in model.named_modules():
+            if hasattr(_elo_mod, "lora_A_up"):
+                for _k in ("lora_A_up", "lora_B_up", "lora_A_down", "lora_B_down"):
+                    _elo_weights[f"{_elo_name}.{_k}"] = getattr(_elo_mod, _k).data.cpu()
+        if _elo_weights:
+            import os as _os
+            _elo_path = _os.path.join(output_dir, "expert_lora_weights.pt")
+            torch.save(_elo_weights, _elo_path)
+            _elo_n = len(_elo_weights)
+            _elo_p = sum(v.numel() for v in _elo_weights.values())
+            print(
+                f"[moe-lora] Saved {_elo_n} expert LoRA tensors "
+                f"({_elo_p:,} params) → {_elo_path}",
+                flush=True,
+            )
 
     _patch_mamba_fastpath(model)
 
@@ -512,7 +643,9 @@ def main():
         weight_decay=0.0,
         max_grad_norm=1e9,
         logging_steps=10,
-        save_strategy="no",
+        save_strategy="steps" if args.ckpt_every > 0 else "no",
+        save_steps=args.ckpt_every if args.ckpt_every > 0 else 500,
+        save_total_limit=1,
         bf16=True,
         gradient_checkpointing=True,           # Unsloth silently disables native GC when False → step-0 OOM at seq_len>=4096
         gradient_checkpointing_kwargs={"use_reentrant": False},
@@ -543,7 +676,17 @@ def main():
             def on_step_end(self, ta, state: TrainerState, control: TrainerControl, **kw):
                 if state.global_step > 0 and state.global_step % args.ckpt_every == 0:
                     model.save_pretrained(_ckpt_dir)
+                    _save_expert_lora(_ckpt_dir)
                     print(f"[ckpt] step {state.global_step} → {_ckpt_dir}", flush=True)
+                return control
+
+            def on_save(self, ta, state: TrainerState, control: TrainerControl, **kw):
+                # Trainer just wrote checkpoint-{step}/ with optimizer/scheduler state.
+                # Add expert LoRA weights so the checkpoint is self-contained for resumption.
+                import os as _os_s
+                _trainer_ckpt = _os_s.path.join(args.output_dir, f"checkpoint-{state.global_step}")
+                if _os_s.path.isdir(_trainer_ckpt):
+                    _save_expert_lora(_trainer_ckpt)
                 return control
 
         trainer.add_callback(_PeriodicAdapterSave())
@@ -566,12 +709,14 @@ def main():
 
     # ── train ───────────────────────────────────────────────────────────────────
     print("Starting training...", flush=True)
-    trainer.train()
+    _resume = args.resume_from_checkpoint if args.resume_from_checkpoint else False
+    trainer.train(resume_from_checkpoint=_resume)
     print("Training complete", flush=True)
 
     # ── save adapter ────────────────────────────────────────────────────────────
     model.save_pretrained(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
+    _save_expert_lora(args.output_dir)
 
     from safetensors.torch import load_file
     st_path = Path(args.output_dir) / "adapter_model.safetensors"

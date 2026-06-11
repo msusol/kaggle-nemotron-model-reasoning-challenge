@@ -114,7 +114,7 @@ LoRA keys for a standard PEFT adapter save.
 
 ## 5. Resolution
 
-**Status: Partially resolved**
+**Status: Partially resolved (as of run6)**
 
 Three run6 submission attempts ERRORed due to fused MoE expert keys. A filtered 232-key
 submission was created (expert keys stripped) and resubmitted. Score pending.
@@ -125,7 +125,7 @@ in PEFT adapter save) is a separate known limitation — deferred per Option C.
 
 ## 6. Follow-ups
 
-### Option A: Per-expert LoRA (matches huikang)
+### Option A: Per-expert LoRA (matches huikang)  ✅ IMPLEMENTED — run12 (2026-06-11)
 Replace `target_parameters` with explicit per-expert `target_modules`. Requires the
 routed expert tensors to be exposed as individual `nn.Linear` modules before calling
 `get_peft_model`. Unsloth may or may not support this on GB10/Blackwell — needs testing.
@@ -143,3 +143,78 @@ run7 scores plateau before the huikang-tier ceiling.
 
 **Priority**: Wait for run6 score. If score is competitive (≥0.60), Option C may be
 sufficient. If gap persists, investigate Option A for a future run.
+
+---
+
+## 7. Option A Implementation — Per-Expert LoRA via nn.Parameter injection (run12)
+
+**Date:** 2026-06-11  
+**Status: CONFIRMED WORKING**
+
+### Approach
+
+`NemotronHExperts` holds fused expert tensors as 3D parameters (`[E, out, in]`), not as
+`nn.Linear` modules. PEFT cannot target them with `target_modules`. Instead, we inject
+LoRA A/B matrices as raw `nn.Parameter` objects directly onto each `NemotronHExperts`
+instance before calling `get_peft_model`, then patch the class-level `forward` to add
+the LoRA contribution per-expert via index slicing.
+
+**Parameters added per NemotronHExperts module:**
+
+| Name | Shape | Init |
+|---|---|---|
+| `lora_A_up` | `[E, r, in_features]` | kaiming_uniform |
+| `lora_B_up` | `[E, out_features, r]` | zeros |
+| `lora_A_down` | `[E, r, in_features]` | kaiming_uniform |
+| `lora_B_down` | `[E, out_features, r]` | zeros |
+
+E=128 experts, r=32, in=2688 (hidden), out=1856 (moe_intermediate_size).
+
+### Root Cause of Freezing (runs 9–11)
+
+`FastBaseModel.get_peft_model` → `post_patch_model` → `prepare_model_for_training`
+(`/usr/local/lib/python3.12/dist-packages/unsloth_zoo/training_utils.py` line 147):
+
+```python
+if ".lora_A." in name or ".lora_B." in name or ".lora_magnitude_vector" in name:
+    requires_grad = True
+else:
+    requires_grad = False
+```
+
+The check requires `.lora_A.` with **dots on both sides**. Our params are named
+`lora_A_up`, `lora_B_up`, etc. — underscore suffix, no trailing dot. They were silently
+frozen every run (runs 9–11 all showed 27.7M trainable instead of 884M).
+
+### Fix
+
+After `get_peft_model` returns, explicitly re-enable `requires_grad` for all four
+expert LoRA param basenames (`scripts/train_v9_sft.py` lines ~363–374):
+
+```python
+_expert_lora_param_names = {"lora_A_up", "lora_B_up", "lora_A_down", "lora_B_down"}
+for _pn, _pp in model.named_parameters():
+    if _pn.rsplit(".", 1)[-1] in _expert_lora_param_names:
+        _pp.requires_grad_(True)
+        _regrad_count += 1
+```
+
+### Proof — run12 log (2026-06-11)
+
+```
+[moe-lora] Injected per-expert LoRA into 23 NemotronHExperts modules, r=32, scaling=1.000
+[moe-lora] Re-enabled requires_grad on 92 expert LoRA params
+[moe-lora] first expert LoRA at 'base_model.model.model.layers.1.mixer.experts'
+           A_up:[128, 32, 2688]  B_up:[128, 1856, 32]
+           A_down:[128, 32, 1856]  B_down:[128, 2688, 32]
+Trainable: 883,873,792 / Total: 32,461,811,136
+Unsloth: Trainable parameters = 883,873,792 of 32,461,811,136 (2.72% trained)
+```
+
+92 params = 23 MoE blocks × 4 tensors. 883,873,792 trainable vs 27,711,488 in runs 9–11.
+
+### Adapter Save
+
+Expert LoRA weights are saved separately alongside the PEFT adapter as
+`expert_lora_weights.pt` via `_save_expert_lora(output_dir)`. The Kaggle inference
+notebook must load this file and apply the same per-expert forward patch at inference time.

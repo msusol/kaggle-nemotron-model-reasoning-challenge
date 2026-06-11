@@ -14,9 +14,13 @@
 #   - All Python package pins unchanged from 26.04 until verified
 #
 # Known version issues (carried from 26.04, monitor for fixes in 26.05):
-#   - peft==0.14.0 vs Kaggle adapters saved with peft_version="0.18.1": loads fine
-#     but emits "Unexpected keyword arguments ['peft_version']" UserWarning on load.
-#     Upgrading peft risks breaking Unsloth's patching; keep 0.14.0 until tested.
+#   - peft==0.19.1: upgraded from 0.14.0 to enable target_parameters support (peft
+#     0.19+). This is required for per-expert batched LoRA on NemotronH MoE layers —
+#     peft 0.14.0 silently ignores LoraConfig.target_parameters, which caused
+#     trainable params to stay at 27.7M (no routed-expert LoRA) instead of ~455M.
+#     Unsloth 2026.6.2 was designed for peft >= 0.19 and is compatible.
+#     Kaggle adapters saved with peft_version="0.18.1" load fine; UserWarning about
+#     'peft_version' key is cosmetic and harmless.
 #   - NemotronHForCausalLM.supports_gradient_checkpointing=False: standard
 #     gradient_checkpointing_enable() raises ValueError. Worked around in
 #     train_v9_sft.py by no-op override after native _set_gradient_checkpointing().
@@ -64,7 +68,7 @@ RUN pip install \
     "transformers==5.5.3" \
     "datasets==3.2.0" \
     "accelerate==1.3.0" \
-    "peft==0.14.0" \
+    "peft==0.19.1" \
     "trl==0.15.2" \
     "torchao==0.17.0" \
     "huggingface_hub>=1.5.0,<2.0" \
@@ -182,7 +186,7 @@ PYEOF
 RUN pip install unsloth unsloth_zoo --no-deps && \
     pip install \
         "transformers==5.5.3" \
-        "peft==0.14.0" \
+        "peft==0.19.1" \
         "trl==0.15.2" \
         "accelerate==1.3.0" \
         --force-reinstall --no-deps && \

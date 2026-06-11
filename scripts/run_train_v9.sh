@@ -4,14 +4,20 @@
 #
 # Usage (always inside a tmux session):
 #   tmux new -s train_v9
-#   RUN_NAME=v12_spark \
-#   TRAIN_FILE=/workspace/data/v0.12_train.jsonl \
+#   RUN_NAME=v9_run12 \
+#   TRAIN_FILE=/workspace/data/v0.9_train.jsonl \
 #   WARMSTART_ADAPTER=/workspace/warmstart \
+#   RESUME_FROM_CHECKPOINT=/workspace/output/adapter_v9_run12/checkpoint-500 \
 #   MIN_SEQ_LENGTH=2048 \
 #   MAX_SEQ_LENGTH=8192 \
 #   MAX_STEPS=600 \
 #   LEARNING_RATE=1e-4 \
 #   bash scripts/run_train_v9.sh
+#
+# RESUME_FROM_CHECKPOINT restores optimizer, scheduler, step count, and expert LoRA
+# weights from a Trainer checkpoint. Checkpoints are saved every --ckpt-every steps
+# to <output_dir>/checkpoint-{step}/ (contains optimizer.pt, expert_lora_weights.pt).
+# Pass "true" to auto-detect the latest checkpoint in the output dir.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,6 +30,7 @@ fi
 RUN_NAME="${RUN_NAME:-v9_$(date +%Y%m%d_%H%M%S)}"
 TRAIN_FILE="${TRAIN_FILE:-/workspace/data/v0.9_train.jsonl}"
 WARMSTART_ADAPTER="${WARMSTART_ADAPTER:-}"
+RESUME_FROM_CHECKPOINT="${RESUME_FROM_CHECKPOINT:-}"
 MIN_SEQ_LENGTH="${MIN_SEQ_LENGTH:-0}"
 MAX_SEQ_LENGTH="${MAX_SEQ_LENGTH:-2048}"
 MAX_STEPS="${MAX_STEPS:-1000}"
@@ -35,6 +42,7 @@ mkdir -p "${WORKSPACE}/output"
 echo "RUN_NAME:         ${RUN_NAME}"
 echo "TRAIN_FILE:       ${TRAIN_FILE}"
 echo "WARMSTART:        ${WARMSTART_ADAPTER:-none}"
+echo "RESUME_CKPT:      ${RESUME_FROM_CHECKPOINT:-none}"
 echo "MIN_SEQ_LENGTH:   ${MIN_SEQ_LENGTH}"
 echo "MAX_SEQ_LENGTH:   ${MAX_SEQ_LENGTH}"
 echo "MAX_STEPS:        ${MAX_STEPS}"
@@ -168,6 +176,7 @@ ionice -c 2 -n 7 docker run --privileged \
     --lora-alpha     32 \
     --seed           3407 \
     ${WARMSTART_ADAPTER:+--warmstart-adapter "${WARMSTART_ADAPTER}"} \
+    ${RESUME_FROM_CHECKPOINT:+--resume-from-checkpoint "${RESUME_FROM_CHECKPOINT}"} \
   2>&1 | tee "${LOG_FILE}"
 TRAIN_EXIT=${PIPESTATUS[0]}
 set -e

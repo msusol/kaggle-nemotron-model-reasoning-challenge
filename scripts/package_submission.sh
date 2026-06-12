@@ -38,6 +38,10 @@ STANDARD_FIELDS = {
 cfg = {k: v for k, v in raw.items() if k in STANDARD_FIELDS}
 cfg["base_model_name_or_path"] = "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
 cfg["auto_mapping"] = None
+# Strip dead Mamba out_proj — zero-gradient path (UnslothCheckpointFunction guard)
+if "out_proj" in cfg.get("target_modules", []):
+    cfg["target_modules"] = [m for m in cfg["target_modules"] if m != "out_proj"]
+    print("  removed dead 'out_proj' from target_modules")
 
 stripped = sorted(set(raw) - set(cfg))
 json.dump(cfg, open(p, "w"), indent=2)
@@ -66,13 +70,76 @@ with safe_open(src, framework="pt") as f:
     for key in f.keys():
         if "mixer.experts.lora_" in key and "shared_" not in key:
             dropped.append(key)
+        elif "mixer.out_proj.lora_" in key:
+            # Dead path: Unsloth's UnslothCheckpointFunction guard blocks gradients when
+            # Mamba scan output (args[0]) lacks requires_grad=True. lora_B stays exactly
+            # zero throughout training; zero-contribution keys add filesize for no benefit.
+            dropped.append(key)
         else:
             kept[key] = f.get_tensor(key)
 save_file(kept, dst)
-print(f"Safetensors: kept {len(kept)} keys, dropped {len(dropped)} fused MoE expert keys")
+print(f"Safetensors: kept {len(kept)} keys, dropped {len(dropped)} keys (fused MoE expert + dead out_proj)")
 if dropped:
-    print(f"  dropped pattern: {dropped[0].split('layers.')[1].split('.lora')[0]}...  ({len(dropped)} total)")
+    print(f"  sample dropped: {dropped[0]}  ({len(dropped)} total)")
 PYEOF
+
+# ── Inject per-routed-expert LoRA as standard PEFT keys ─────────────────────
+# expert_lora_weights.pt stores fused tensors keyed as:
+#   "{prefix}.lora_{A/B}_{up/down}" shape [128, r, dim]
+# Kaggle's unfused NemotronH exposes individual nn.Linear per routed expert
+# (mixer.experts.{j}.up_proj), so standard PEFT can load per-expert LoRA if
+# the keys are saved in PEFT format. Without this step, the 856M expert params
+# trained on DGX Spark are unused at inference.
+ELO_PATH="$ADAPTER_DIR/expert_lora_weights.pt"
+if [ -f "$ELO_PATH" ]; then
+  ST_TMP="${ST_OUT}.tmp_elo"
+  python3 - "$ST_OUT" "$ELO_PATH" "$ST_TMP" <<'PYEOF'
+import sys, torch
+from safetensors import safe_open
+from safetensors.torch import save_file
+
+st_in, elo_path, st_out = sys.argv[1], sys.argv[2], sys.argv[3]
+
+# Load existing filtered safetensors
+tensors = {}
+with safe_open(st_in, framework="pt") as f:
+    for key in f.keys():
+        tensors[key] = f.get_tensor(key)
+
+# Load expert LoRA and convert to per-expert PEFT keys
+elo = torch.load(elo_path, map_location="cpu", weights_only=True)
+suffix_map = {
+    "lora_A_up":   ("up_proj",   "lora_A"),
+    "lora_B_up":   ("up_proj",   "lora_B"),
+    "lora_A_down": ("down_proj", "lora_A"),
+    "lora_B_down": ("down_proj", "lora_B"),
+}
+added_keys = 0
+for src_key in sorted(elo.keys()):
+    src_tensor = elo[src_key]
+    prefix, param = src_key.rsplit(".", 1)
+    if param not in suffix_map:
+        print(f"  WARNING: unknown param '{param}' in {src_key} — skipped")
+        continue
+    proj_name, lora_name = suffix_map[param]
+    E = src_tensor.shape[0]  # 128 experts
+    for j in range(E):
+        # e.g. base_model.model.model.layers.1.mixer.experts.0.up_proj.lora_A.weight
+        peft_key = f"{prefix}.{j}.{proj_name}.{lora_name}.weight"
+        tensors[peft_key] = src_tensor[j].contiguous()
+        added_keys += 1
+
+routed_layers = len(elo) // 4
+n_experts = elo[next(iter(elo))].shape[0]
+save_file(tensors, st_out)
+print(f"Expert LoRA injected: {routed_layers} layers × {n_experts} experts × 4 tensors = {added_keys} keys added")
+print(f"Total safetensors keys: {len(tensors)}")
+PYEOF
+  mv "$ST_TMP" "$ST_OUT"
+  echo "  expert_lora_weights.pt injected into filtered safetensors"
+else
+  echo "  No expert_lora_weights.pt found — routed-expert LoRA not included (shared-expert LoRA still applies)"
+fi
 
 rm -f "$ZIP_PATH"
 

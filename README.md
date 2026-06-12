@@ -85,6 +85,20 @@ curriculum that mirrors the Kaggle notebook strategy:
   instead of raising an error, producing an inconsistent 883M-param adapter. Always start
   from the base model on GB10 for the first run of any new target-module set.
 
+- **Expert LoRA: Kaggle evaluator uses unfused NemotronH** (discovered 2026-06-11):
+  Standard PEFT regex `.*\.(up_proj|down_proj)$` on the Kaggle-side model yields
+  880M trainable params — matching our per-expert LoRA count exactly. This means the
+  Kaggle evaluator's NemotronH exposes 128 individual `nn.Linear` modules per MoE layer
+  (`mixer.experts.{j}.up_proj`), unlike the fused `NemotronHExperts` tensor used in
+  our DGX Spark / Unsloth training path. As a result, expert LoRA weights trained on
+  DGX Spark **must be converted** from fused `[128, r, dim]` tensors into 11,776
+  per-expert PEFT keys before packaging. `scripts/package_submission.sh` now performs
+  this conversion automatically when `expert_lora_weights.pt` is present in the adapter
+  directory. Runs 9–12 submitted without this conversion (856M expert params unused at
+  inference); run13 is the first to close the gap end-to-end. See
+  [`docs/investigate/routed-expert-lora-capture.md §8`](docs/investigate/routed-expert-lora-capture.md)
+  for the full analysis.
+
 - **Gradient checkpointing workaround**: `NemotronHForCausalLM.supports_gradient_checkpointing=False`
   blocks the standard `gradient_checkpointing_enable()` path. Native GC is enabled via
   `NemotronHModel._set_gradient_checkpointing()` before training, then

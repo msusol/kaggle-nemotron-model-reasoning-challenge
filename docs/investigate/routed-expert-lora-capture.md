@@ -218,3 +218,113 @@ Unsloth: Trainable parameters = 883,873,792 of 32,461,811,136 (2.72% trained)
 Expert LoRA weights are saved separately alongside the PEFT adapter as
 `expert_lora_weights.pt` via `_save_expert_lora(output_dir)`. The Kaggle inference
 notebook must load this file and apply the same per-expert forward patch at inference time.
+
+---
+
+## 8. AhHa — Kaggle's NemotronH is Unfused: expert LoRA IS submittable as standard PEFT
+
+**Date:** 2026-06-11  
+**Status: RESOLVED — `package_submission.sh` updated (commit a6627c3)**
+
+### Discovery
+
+A Kaggle discussion thread shared this starter notebook snippet:
+
+```python
+lora_config = LoraConfig(
+    r=32,
+    target_modules=r".*\.(in_proj|out_proj|up_proj|down_proj)$",
+    ...
+)
+model = get_peft_model(model, lora_config)
+model.print_trainable_parameters()
+# trainable params: 880,138,240 || all params: 32,458,075,584 || trainable%: 2.71
+```
+
+**Standard PEFT with a regex gets 880M trainable params** — almost exactly the same as
+our per-expert LoRA injection (878–883M). This is only possible if the NemotronH model
+in Kaggle's evaluation environment **exposes individual `nn.Linear` modules per routed
+expert** (`mixer.experts.{j}.up_proj`, `mixer.experts.{j}.down_proj`) accessible by
+PEFT's named-module traversal.
+
+Our DGX Spark training environment uses Unsloth's **fused** path: `NemotronHExperts`
+stores all 128 expert weights as a single 3D tensor (`[E, out, in]`) — no individual
+`nn.Linear` per expert. This is why we needed custom `nn.Parameter` injection in run12+.
+The Kaggle evaluator's NemotronH is **unfused**.
+
+### The Missing Link
+
+Runs 9–13 all trained 856M+ expert LoRA params, but **every submission carried zero
+expert LoRA at inference**:
+
+| Submitted file | Content | Expert LoRA present? |
+|---|---|---|
+| `adapter_model.safetensors` | Standard PEFT keys for attention, shared-expert, Mamba in_proj | ❌ No routed-expert keys |
+| `expert_lora_weights.pt` | Fused tensors `[128, r, dim]` per layer | Not in submission zip |
+
+The `expert_lora_weights.pt` was never included in `submission.zip`. Even if it were,
+the standard PEFT evaluator would not know to load it.
+
+### Parameter Count Verification
+
+Why 880M ≈ our 878M:
+
+```
+23 MoE layers × 128 experts × (
+    up_proj lora_A  [32, 2688] + lora_B  [1856, 32] +    # 145,408 params
+    down_proj lora_A [32, 1856] + lora_B [2688, 32]       # 145,408 params
+) = 23 × 128 × 290,816 = 855,760,896
+
++ 23 × shared_expert (up+down lora_A+B) ≈ 13.4M
++ 23 × in_proj (Mamba SSM)              ≈  6.5M
++ out_proj / attention                  ≈  4.4M
+                                        ≈ 880M  ✓
+```
+
+The Kaggle thread's 880M confirms the routed expert modules exist in the evaluator's
+model and PEFT successfully wraps them individually.
+
+### Fix: Convert Fused → Per-Expert PEFT Keys
+
+`scripts/package_submission.sh` now loads `expert_lora_weights.pt` after filtering
+and expands each `[128, r, dim]` tensor into 128 individual PEFT-format keys:
+
+```
+Input  (fused):   base_model.model.model.layers.{i}.mixer.experts.lora_A_up
+                  shape [128, 32, 2688]
+
+Output (per-expert, 128 keys per layer per tensor):
+  base_model.model.model.layers.{i}.mixer.experts.0.up_proj.lora_A.weight  [32, 2688]
+  base_model.model.model.layers.{i}.mixer.experts.1.up_proj.lora_A.weight  [32, 2688]
+  ...
+  base_model.model.model.layers.{i}.mixer.experts.127.up_proj.lora_A.weight [32, 2688]
+```
+
+**23 layers × 128 experts × 4 tensors = 11,776 keys added** to `adapter_model.safetensors`.
+Total submission safetensors: 186 existing keys + 11,776 expert keys = **11,962 keys**.
+
+### Scaling Compatibility
+
+Both our custom training code and standard PEFT use `scaling = lora_alpha / r`.
+With `lora_alpha=32, r=32` → `scaling=1.0` in both cases. The tensors are compatible
+as-is; no pre-scaling needed before injection.
+
+### Prior Runs Affected
+
+| Run | Expert LoRA trained? | Expert LoRA submitted? | Impact |
+|---|---|---|---|
+| run9–11 | ❌ Frozen (requires_grad bug) | ❌ | 0 expert LoRA at training and inference |
+| run12 | ✅ 883M trainable (fix applied) | ❌ Not converted | 856M expert params unused at Kaggle inference |
+| run13 | ✅ 878M trainable (fix + out_proj removed) | ✅ Conversion in place | First run to fully use expert LoRA end-to-end |
+
+### Evidence: Run12 Expert LoRA Was Training (Not Frozen)
+
+Step-330 `expert_lora_weights.pt` inspection confirmed all `lora_B` tensors non-zero:
+
+```
+lora_B_up  (23 layers): max=0.034912  min=0.014404  all_zero=False
+lora_B_down (23 layers): max=0.018921  min=0.014343  all_zero=False
+```
+
+The expert LoRA **was training** in run12 — the gap was only in the submission packaging,
+not in the training code. Run13 is the first submission to close this gap.

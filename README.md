@@ -55,27 +55,34 @@ Unsloth's fused kernels.
 | Step | Train Loss | Kaggle Score | Notes |
 |---|---|---|---|
 | 100 | 0.2211 | 0.45 | Expert LoRA undertrained at step 100 |
-| 500 | 0.1864 | **0.58** ★ | Epoch 2 boundary — best overall |
+| 500 | 0.1864 | **0.58** | Epoch 2 boundary — best run13 checkpoint |
 | 600 | 0.1702 | 0.55 | Mid-epoch oscillation |
 | 700 | 0.1380 | 0.57 | Epoch 3 boundary recovers |
-| 800 | 0.1265 | pending | Best checkpoint train loss |
-| 1000 | 0.1220 | pending | Final; submitted 2026-06-13 |
+| 1000 | 0.1220 | 0.49 | Final — overfit past step-500 |
 
-**Key finding**: epoch-boundary checkpoints generalize better than mid-epoch despite lower
-train loss. Mild overfit after step 500 — cured by v0.12's fresh data distribution.
+**Key finding**: model overfit on 4 epochs of v0.9 data (seq=2048). Cured by v0.12's broader
+augmented distribution.
 
 ![run13 loss curve](docs/images/run13_loss_curve.png)
 
-### v0.12 run14 — augmented data, warmstart from run13 (active)
+### v0.12 run14 — augmented data, warmstart from run13 (complete)
 
-600 steps · seq=4096 · lr=1e-4 · warmstart: run13 step-1000 (878M params)
+300 steps (stopped early) · seq=4096 · lr=1e-4 · warmstart: run13 step-1000 · **0.64 ★ new best**
 
 Data: 25,500 rows — 13,730 v0.9 base + 11,770 augmented examples for under-represented
-categories (generated from `huikang/huikang-nemotron-repository-snapshot` augmenters/reasoners).
-After seq=4096 filtering: 15,502 examples used.
+categories. After seq=4096 filtering: 15,502 examples used.
 
-The warmstart inherits run13's fully-trained 856M expert LoRA params. v0.12 uses a richer
-distribution to escape run13's mild overfit while preserving the learned reasoning format.
+Loss plateaued at 0.285 from step 80 (LR=1e-4 too conservative for a deeply-converged warmstart).
+Stopped at step 300 and submitted — scored **0.64**, +0.06 vs run13 best. Confirms v0.12 augmented
+data at seq=4096 is the better training distribution.
+
+### v0.12 run15 — higher LR warmstart from run14 (active)
+
+600 steps · seq=4096 · lr=2e-4 · warmstart: run14 step-300 · checkpoint every 100 steps
+
+Same v0.12 data distribution. LR raised from 1e-4 → 2e-4 with fresh Adam state to escape the
+plateau that stalled run14 at step 80. Targeting checkpoints at 100, 200, 300, 400, 500, 600 —
+submit 2-3 candidates to find peak before overfit.
 
 See [`docs/plans/v0.12-reasoner-data-spark-sft.md`](docs/plans/v0.12-reasoner-data-spark-sft.md)
 for the full training journey narrative.
@@ -102,12 +109,13 @@ for the full training journey narrative.
 │       ├── v0.12-reasoner-data-spark-sft.md  # current plan — training journey + v0.12
 │       └── TODO.md
 ├── output/
-│   ├── adapter_v9_run13_ckpt/      # run13 final checkpoint (warmstart for v0.12)
-│   └── adapter_v12_spark_ckpt/     # run14 rolling checkpoint (updated every 100 steps)
+│   ├── adapter_v9_run13_ckpt/      # run13 final checkpoint
+│   ├── adapter_v12_spark_ckpt/     # run14 step-300 checkpoint (0.64 — warmstart for run15)
+│   └── adapter_v12_run15/          # run15 checkpoints (active — every 100 steps)
 └── scripts/
     ├── train_v9_sft.py             # SFT trainer — warmstart, per-expert LoRA, expert_lora_weights.pt
     ├── run_train_v9.sh             # Docker runner for v0.9 runs
-    ├── run_train_v12.sh            # Docker runner for v0.12 run14
+    ├── run_train_v12.sh            # Docker runner for v0.12/v0.15 runs
     ├── package_submission.sh       # convert expert_lora_weights.pt → 11,776 PEFT keys + zip
     ├── generate_reasoner_data.py   # generate augmented examples from huikang reasoners
     ├── prepare_v09_data.py         # build v0.9_train.jsonl (Format 4, 14 categories)
@@ -116,22 +124,19 @@ for the full training journey narrative.
 
 ## Commands
 
-### Train (v0.12 run14 — active)
+### Train (run15 — active)
 
 ```zsh
 # Always in tmux — never run directly
-tmux new -s train_v12
-RUN_NAME=v12_spark \
-TRAIN_FILE=data/v0.12_train.jsonl \
-WARMSTART_ADAPTER=output/adapter_v9_run13_ckpt \
-MAX_SEQ_LENGTH=4096 \
-MAX_STEPS=600 \
-LEARNING_RATE=1e-4 \
+tmux new -s train15
+RUN_NAME=v12_run15 \
+WARMSTART_ADAPTER=output/adapter_v12_spark_ckpt \
+LEARNING_RATE=2e-4 \
 bash scripts/run_train_v12.sh
 ```
 
 Verify warmstart in log: `[moe-lora] Warmstart: loaded 92 expert LoRA weights`  
-Monitor: `tail -f output/train_v12_spark.log`
+Monitor: `tail -f output/train_v12_run15.log`
 
 ### Package and submit
 
@@ -174,12 +179,10 @@ Always build on the GB10 directly — never import an x86_64 image. The `causal_
 
 See [`docs/plans/leaderboard.md`](docs/plans/leaderboard.md) for the full run history.
 
-| Version | Kaggle Score | Notes |
-|---|---|---|
-| v0.9-run13-step100 | 0.45 | Expert LoRA undertrained at step 100 |
-| v0.9-run13-step500 | **0.58** ★ | Epoch 2 boundary — best overall |
-| v0.9-run13-step600 | 0.55 | Mid-epoch oscillation |
-| v0.9-run13-step700 | 0.57 | Epoch 3 boundary recovers |
-| v0.9-run13-step800 | pending | Best checkpoint train loss (0.1265) |
-| v0.9-run13-step1000 | pending | Final checkpoint (0.1220) |
-| v0.12-run14 | — | Active — warmstart run13, 25,500 rows |
+| Version | Seq Len | PEFT Keys | Trainable Params | Train Loss | Kaggle Score | Notes |
+|---|---|---|---|---|---|---|
+| v0.9-run13-step500 | 2048 | 11,962 (186 base + 11,776 expert) | 878M | 0.1864 | 0.58 | Best run13 checkpoint — epoch 2 boundary |
+| v0.9-run13-step700 | 2048 | 11,962 (186 base + 11,776 expert) | 878M | 0.1380 | 0.57 | Epoch 3 boundary |
+| v0.9-run13-step1000 | 2048 | 11,962 (186 base + 11,776 expert) | 878M | 0.1220 | 0.49 | Overfit — 4 epochs on v0.9 data |
+| v0.12-run14-step300 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | ~0.285 | **0.64 ★** | New best — warmstart run13, v0.12 augmented data |
+| v0.12-run15 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | — | **active** | Warmstart run14, lr=2e-4, checkpoint every 100 steps |

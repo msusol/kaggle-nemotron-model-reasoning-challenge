@@ -35,6 +35,7 @@ MIN_SEQ_LENGTH="${MIN_SEQ_LENGTH:-0}"
 MAX_SEQ_LENGTH="${MAX_SEQ_LENGTH:-2048}"
 MAX_STEPS="${MAX_STEPS:-1000}"
 LEARNING_RATE="${LEARNING_RATE:-2e-4}"
+CKPT_EVERY="${CKPT_EVERY:-50}"
 ADAPTER_OUT="/workspace/output/adapter_${RUN_NAME}"
 LOG_FILE="${WORKSPACE}/output/train_${RUN_NAME}.log"
 mkdir -p "${WORKSPACE}/output"
@@ -47,6 +48,7 @@ echo "MIN_SEQ_LENGTH:   ${MIN_SEQ_LENGTH}"
 echo "MAX_SEQ_LENGTH:   ${MAX_SEQ_LENGTH}"
 echo "MAX_STEPS:        ${MAX_STEPS}"
 echo "LEARNING_RATE:    ${LEARNING_RATE}"
+echo "CKPT_EVERY:       ${CKPT_EVERY}"
 echo "Adapter out:      ${ADAPTER_OUT}"
 echo "Log:              ${LOG_FILE}"
 
@@ -175,6 +177,7 @@ ionice -c 2 -n 7 docker run --privileged \
     --lora-r         32 \
     --lora-alpha     32 \
     --seed           3407 \
+    --ckpt-every     "${CKPT_EVERY}" \
     ${WARMSTART_ADAPTER:+--warmstart-adapter "${WARMSTART_ADAPTER}"} \
     ${RESUME_FROM_CHECKPOINT:+--resume-from-checkpoint "${RESUME_FROM_CHECKPOINT}"} \
   2>&1 | tee "${LOG_FILE}"

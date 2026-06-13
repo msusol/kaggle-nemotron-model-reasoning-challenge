@@ -3,21 +3,26 @@
 
 Reads category from the "category" field, falling back to "bucket".
 
+Filter: if --max-tokens is set, examples whose chat-template rendering exceeds that
+        token count are dropped *before* balancing (requires transformers).
 Cap:    categories above --max are randomly downsampled to --max.
 Repeat: categories below --min are cycled (round-robin) up to --min.
 Output is shuffled with a fixed --seed for reproducibility.
 
 Usage:
     python scripts/balance_dataset.py \\
-        --input  data/v0.12_train.jsonl \\
+        --input  data/v0.13_merged.jsonl \\
         --output data/v0.13_train.jsonl \\
+        --max-tokens 4096 \\
+        --tokenizer-id nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 \\
         --max-per-category 1500 \\
         --min-per-category 300 \\
         --seed 42
 
     # Dry run — print distribution only, write nothing:
     python scripts/balance_dataset.py \\
-        --input data/v0.12_train.jsonl \\
+        --input data/v0.13_merged.jsonl \\
+        --max-tokens 4096 \\
         --dry-run
 """
 
@@ -54,12 +59,64 @@ def print_distribution(label: str, buckets: dict[str, list]) -> None:
         print(f"  {cat:<35} {len(buckets[cat]):>5}")
 
 
+def filter_by_tokens(
+    records: list[dict],
+    max_tokens: int,
+    tokenizer_id: str,
+) -> list[dict]:
+    """Drop records whose chat-template rendering exceeds max_tokens tokens."""
+    print(f"\nToken filter: loading tokenizer '{tokenizer_id}'...", flush=True)
+    from transformers import AutoTokenizer  # noqa: PLC0415  (lazy import)
+
+    tok = AutoTokenizer.from_pretrained(tokenizer_id)
+    if tok.pad_token is None:
+        tok.pad_token = tok.eos_token
+    print(f"  Tokenizer loaded. Filtering > {max_tokens} tokens...", flush=True)
+
+    kept, dropped = [], 0
+    drop_by_cat: dict[str, int] = defaultdict(int)
+    for i, r in enumerate(records):
+        try:
+            text = tok.apply_chat_template(
+                r["messages"],
+                tokenize=False,
+                add_generation_prompt=False,
+                enable_thinking=True,
+            )
+        except TypeError:
+            text = tok.apply_chat_template(
+                r["messages"], tokenize=False, add_generation_prompt=False
+            )
+        n_tok = len(tok(text, truncation=False, add_special_tokens=False)["input_ids"])
+        if n_tok > max_tokens:
+            dropped += 1
+            drop_by_cat[get_category(r)] += 1
+        else:
+            kept.append(r)
+        if (i + 1) % 5000 == 0:
+            print(f"  ... {i+1:,} processed", flush=True)
+
+    print(f"  Kept {len(kept):,} / dropped {dropped:,} (>{max_tokens} tok)", flush=True)
+    if drop_by_cat:
+        print("  Dropped per category:")
+        for cat, n in sorted(drop_by_cat.items(), key=lambda x: -x[1]):
+            print(f"    {cat:<35} {n:>5}")
+    return kept
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--input",  required=True, help="Input JSONL file")
     ap.add_argument("--output", help="Output JSONL file (omit with --dry-run)")
+    ap.add_argument("--max-tokens", type=int, default=None,
+                    help="Drop examples with more than this many tokens before balancing "
+                         "(requires transformers + --tokenizer-id)")
+    ap.add_argument("--tokenizer-id",
+                    default="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16",
+                    help="HuggingFace model ID for tokenizer used with --max-tokens "
+                         "(default: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16)")
     ap.add_argument("--max-per-category", type=int, default=None,
                     help="Cap categories above this count (default: no cap)")
     ap.add_argument("--min-per-category", type=int, default=None,
@@ -77,6 +134,10 @@ def main() -> None:
     print(f"Loading: {args.input}", flush=True)
     records = load_jsonl(Path(args.input))
     print(f"  {len(records):,} records loaded", flush=True)
+
+    # Token-length filter (before balancing so caps/repeats reflect what training sees)
+    if args.max_tokens is not None:
+        records = filter_by_tokens(records, args.max_tokens, args.tokenizer_id)
 
     # Bucket by category
     buckets: dict[str, list] = defaultdict(list)

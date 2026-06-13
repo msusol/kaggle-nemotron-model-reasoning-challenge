@@ -69,6 +69,10 @@ Side-by-side comparison of poster's config vs our two platforms:
 | `lora_alpha` | 128 | 32 | 32 |
 | `effective LoRA scale` | ~2e-4 (if r=32) | 2e-4 | 2e-4 |
 | `warmup_steps` | 10 | dynamic `min(50, n_steps//10)` | dynamic `min(50, n_steps//10)` |
+| `adam_beta1` | 0.9 | 0.9 | 0.9 |
+| `adam_beta2` | 0.95 | 0.95 | 0.95 |
+| `adam_epsilon` | 1e-8 | 1e-8 | 1e-8 |
+| `weight_decay` | 0.0 | 0.0 | 0.0 |
 | `max_grad_norm` | **1.0** | **1e9** | **1e9** |
 | `lr_scheduler_type` | linear | linear | linear |
 | `attn_implementation` | eager | eager | eager |
@@ -118,9 +122,16 @@ The poster's config solves an OOM problem we already solved differently. Only on
 
 ### Follow-ups
 
-- **`max_grad_norm` experiment**: If run14 or a future warmstart run shows loss spikes or instability, switch `max_grad_norm` from `1e9` → `1.0` in both `scripts/train_v9_sft.py:660` and the Kaggle notebook `SFTConfig`. One-line change, zero throughput cost.
+- **`max_grad_norm=1.0` is irrelevant for run15**: Run14 peak grad_norm was **0.1759** across all 300 steps — clipping at 1.0 would never have triggered. The plateau at loss 0.285 is a data/optimizer convergence issue, not a gradient explosion issue. Do not change `max_grad_norm` for run15.
 
-- **`lora_alpha` ablation**: If we want to explore higher LoRA capacity, try `alpha=128, lr=5e-5` in a dedicated RTX Pro run. Requires careful comparison against our current `alpha=32, lr=2e-4` baseline.
+- **Adam params identical — no action needed**: `beta1=0.9`, `beta2=0.95`, `epsilon=1e-8`, `weight_decay=0.0` all match the poster exactly. No changes warranted.
+
+- **Run15 planning**: The run14 plateau (loss 0.285 from step 80, vs run13's 0.122 at step 1000) likely reflects LR=1e-4 being too conservative for warmstart on new data. Run13→run14 warmstart on v0.12 data hit a local minimum immediately. Candidate directions once run14 score is known:
+  - **If run14 scores ≥ 0.58**: continue v0.12 approach at higher LR (2e-4 warmstart or even fresh start on v0.12)
+  - **If run14 scores < 0.58**: the v0.12 augmented data hurts; revert to v0.9 data and extend training further (run15 = longer run13 continuation)
+  - Either way: `max_grad_norm=1.0` is not a lever here.
+
+- **`lora_alpha` ablation**: Low priority. Effective LoRA scale matches poster when `r=32`. Not a factor in the run14 plateau.
 
 ---
 

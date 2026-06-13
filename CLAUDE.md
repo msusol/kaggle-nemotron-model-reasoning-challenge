@@ -26,3 +26,4 @@ Project rules are in [.clinerules/](.clinerules/):
 - [17-leaderboard.md](.clinerules/17-leaderboard.md) — Update `docs/plans/leaderboard.md` after each completed training run and validation pass
 - [18-dgx-long-training-rules.md](.clinerules/18-dgx-long-training-rules.md) — Always use tmux for training; never run_in_background; broken pipe diagnosis
 - [19-kaggle-notebook-workflow.md](.clinerules/19-kaggle-notebook-workflow.md) — All Kaggle changes via `kaggle kernels push`; never instruct UI edits; committed runs preferred
+- [20-copy-paste-content.md](.clinerules/20-copy-paste-content.md) — Write copy/paste content (forum replies, comments, messages) to `/tmp/<slug>.md`

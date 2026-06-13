@@ -5,9 +5,8 @@ Aggregated findings from competition discussion threads. Each section covers one
 | Section | Thread | Poster | Key topic |
 |---|---|---|---|
 | 1 | [#707987](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/707987) | Buzz shocker | SFTConfig hparams, RTX Pro 6000 OOM fix |
-| 2 | (same thread follow-up) | Q3 poster | Category weight distribution, 0.74 LB via symbolic solvers |
-| 3 | (cross-thread) | DaoHe Liu | Unsloth MoE fused keys vs per-expert LoRA; `gate_proj` SiLU root cause |
-| 4 | [#684251](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/684251) | TBD | TBD — pending content |
+| 2 | [#707987](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/707987) follow-up | Q3 poster | Category weight distribution, 0.74 LB via symbolic solvers |
+| 3 | [#684251](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/684251) | DaoHe Liu | Unsloth MoE fused keys vs per-expert LoRA; `gate_proj` SiLU root cause |
 
 ---
 
@@ -252,10 +251,10 @@ No config changes warranted for Spark runs based on this discussion.
 
 ---
 
-## 4. Community insight — Unsloth MoE fused keys vs per-expert LoRA (DaoHe Liu)
+## 3. Discussion #684251 — DaoHe Liu: Unsloth MoE fused keys vs per-expert LoRA
 
 **Date:** 2026-06-13  
-**Source:** Kaggle competition discussion (DaoHe Liu)
+**Source:** https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/684251
 
 ### Context
 

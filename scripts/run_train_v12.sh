@@ -15,6 +15,10 @@
 # The project directory is bind-mounted as /workspace inside the container.
 # All relative paths (output/, data/, scripts/) resolve to /workspace/<path>.
 # Checkpoints land in output/adapter_<RUN_NAME>/ on the host automatically.
+#
+# MAX_SEQ_LENGTH=4096 (default) — run13 used 2048; v0.4 ran 8192 with 27M params but
+# with 878M trainable params the backward pass needs ~4× more activation memory at 8192.
+# Start at 4096; if no OOM within the first 10 steps, can try 8192 next run.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,7 +33,7 @@ TRAIN_FILE="${TRAIN_FILE:-data/v0.12_train.jsonl}"
 WARMSTART_ADAPTER="${WARMSTART_ADAPTER:-output/adapter_v9_run13_ckpt}"
 RESUME_FROM_CHECKPOINT="${RESUME_FROM_CHECKPOINT:-}"
 MIN_SEQ_LENGTH="${MIN_SEQ_LENGTH:-0}"
-MAX_SEQ_LENGTH="${MAX_SEQ_LENGTH:-8192}"
+MAX_SEQ_LENGTH="${MAX_SEQ_LENGTH:-4096}"
 MAX_STEPS="${MAX_STEPS:-600}"
 LEARNING_RATE="${LEARNING_RATE:-1e-4}"
 ADAPTER_OUT="/workspace/output/adapter_${RUN_NAME}"
@@ -167,6 +171,7 @@ ionice -c 2 -n 7 docker run --privileged \
     --lora-r         32 \
     --lora-alpha     32 \
     --seed           3407 \
+    --ckpt-every     100 \
     ${WARMSTART_ADAPTER:+--warmstart-adapter "${WARMSTART_ADAPTER}"} \
     ${RESUME_FROM_CHECKPOINT:+--resume-from-checkpoint "${RESUME_FROM_CHECKPOINT}"} \
   2>&1 | tee "${LOG_FILE}"

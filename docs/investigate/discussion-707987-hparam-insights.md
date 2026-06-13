@@ -288,7 +288,7 @@ Our v0.9 data used `cap 1500/cat` and was far more balanced. The v0.12 augmentat
 
 ### Context
 
-Our DGX Spark runs (`v09_train_spark_gb10.ipynb`) use `train_v9_sft.py` with `seq=2048` (run13) and `seq=4096` (run14). The GB10 has ~400 GB unified memory.
+Our DGX Spark runs (`v09_train_spark_gb10.ipynb`) use `train_v9_sft.py` with `seq=2048` (run13) and `seq=4096` (run14). The GB10 has ~128 GB HBM (measured: 130.7 GB total via `verify_spark_image.sh`, 2026-06-09).
 
 ### Findings
 

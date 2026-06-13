@@ -127,7 +127,7 @@ Side-by-side comparison of poster's config vs our two platforms:
 
 **`out_proj` in target_modules**: Poster includes it. We deliberately exclude it — Unsloth's Mamba fast-path `UnslothCheckpointFunction` guard fires because the SSM scan output does not carry `requires_grad=True`, producing zero gradient for `out_proj` throughout training. See [[mamba-out-proj-lora-dead-path]] for full root cause.
 
-**`gate_proj` in target_modules**: We include it; poster omits it. Confirmed no-op — `adapter_model.safetensors` from both `adapter_v12_spark_ckpt` and `adapter_v9_run13_ckpt` contain zero `gate_proj` keys. NemotronH has no linear named `gate_proj` (neither in shared experts nor routed experts); PEFT silently skips unmatched target strings. Safe to remove from `target_modules` in run15 with no effect on adapter size or score.
+**`gate_proj` in target_modules**: We include it; poster omits it. Confirmed no-op — `adapter_model.safetensors` from both `adapter_v12_spark_ckpt` and `adapter_v9_run13_ckpt` contain zero `gate_proj` keys, and `expert_lora_weights.pt` contains only `lora_A_up`/`lora_B_up`/`lora_A_down`/`lora_B_down` keys (92 total, zero gate entries). **Root cause**: NemotronH MoE experts use **SiLU activation** (not SwiGLU) — there is no gate projection in the architecture. Unsloth's official docs list `gate_proj` as a NemotronH target module, but it is architecturally absent. PEFT silently skips unmatched target strings. Safe to remove from `target_modules` with no effect on adapter size or score.
 
 ### Actions Taken
 
@@ -236,3 +236,58 @@ Not applicable. The poster's config addresses VRAM pressure on a 128 GB GPU. The
 **Status: Deferred**
 
 No config changes warranted for Spark runs based on this discussion.
+
+---
+
+## 4. Community insight — Unsloth MoE fused keys vs per-expert LoRA (DaoHe Liu)
+
+**Date:** 2026-06-13  
+**Source:** Kaggle competition discussion (DaoHe Liu)
+
+### Context
+
+A community member reported confusion: they used the standard Unsloth `get_peft_model` call with `target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj", "in_proj", "out_proj"]` and saw:
+
+> *"Unsloth: Detected MoE model with num_experts = 128 and target_modules = [...]. Enabling LoRA on MoE parameters: ['mlp.experts.gate_up_proj', 'mlp.experts.down_proj']"*
+
+They observed "very few trainable parameters" because Unsloth was only applying LoRA to the fused MoE expert matrices rather than the individual expert projections they specified.
+
+### Findings
+
+**This is the exact fused-key problem we solved in run13.** Three layers of insight:
+
+**1. Unsloth fuses MoE expert projections**
+
+When Unsloth detects a MoE model, it replaces individual `gate_proj`/`up_proj`/`down_proj` targets with fused expert tensors (`mlp.experts.gate_up_proj`, `mlp.experts.down_proj`). The resulting LoRA keys are in Unsloth's internal format — not compatible with Kaggle's vLLM evaluator (`LoRARequest` via standard PEFT). This is why runs 1–12 had expert LoRA trained locally but silently dropped at Kaggle inference.
+
+**2. NemotronH MoE uses SiLU, not SwiGLU — no `gate_proj` exists**
+
+For standard SwiGLU MoE models, Unsloth fuses `gate_proj` + `up_proj` → `gate_up_proj`. For NemotronH, the MoE experts use **SiLU activation** with only `up_proj` and `down_proj` — no gate projection in the architecture at all. Confirmed by inspecting `expert_lora_weights.pt` from run13:
+
+```
+Total expert LoRA keys: 92
+Keys: lora_A_up, lora_B_up, lora_A_down, lora_B_down  (23 layers × 4)
+Gate-related keys: 0
+```
+
+Unsloth's official documentation lists `gate_proj` as a NemotronH target module — this is incorrect for the MoE layers. `gate_proj` is architecturally absent from NemotronH's routed experts.
+
+**3. Our per-expert injection bypasses the fused path entirely**
+
+Our solution (`train_v9_sft.py` MoE LoRA injection) injects LoRA directly into each of the 128 routed experts per MoE layer, producing PEFT-compatible keys:
+```
+mixer.experts.{j}.up_proj.lora_A.weight   (128 experts × 23 layers × 2 = 5,888 keys)
+mixer.experts.{j}.down_proj.lora_A.weight (128 experts × 23 layers × 2 = 5,888 keys)
+Total: 11,776 per-expert PEFT keys
+```
+These are saved to `expert_lora_weights.pt` and converted by `package_submission.sh` before submission. The Kaggle vLLM evaluator loads them correctly — confirmed by run13-step500 scoring 0.58 and run14-step300 scoring 0.64.
+
+### Resolution
+
+**Status: Resolved (our implementation is correct)**
+
+The community member's confusion mirrors our own early runs (1–12). Our per-expert LoRA injection + `package_submission.sh` conversion is the correct solution. The "very few trainable parameters" symptom they describe is the fused Unsloth format — submitting those keys to Kaggle either errors or silently discards the expert LoRA, leaving only the attention adapter (~27M params).
+
+### Actions
+
+None — this validates our existing approach. Confirms `gate_proj` removal from `target_modules` is correct (SiLU architecture, no gate projection).

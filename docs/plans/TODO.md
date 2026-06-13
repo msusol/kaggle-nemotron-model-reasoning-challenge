@@ -329,6 +329,14 @@ Replaces v0.10 on DGX Spark — vLLM sidecar is infeasible (OOM); uses Megatron 
 5. Train on DGX Spark: `train_v9_sft.py --warmstart-adapter ... --max-seq-length 8192 --max-steps 600`
 6. Package and submit; update leaderboard
 
+### v0.13-balanced-data-plan.md
+- [x] Write `scripts/generate_equation_symbolic.py` — synthetic equation_symbolic puzzles (Alice's Wonderland rule-inference format, 4 rule types)
+- [x] Write `scripts/balance_dataset.py` — cap overrepresented + repeat underrepresented categories
+- [x] Generate `data/v0.13_train.jsonl` — 16,181 examples; equation_symbolic 1→501, top cats capped at 1500
+- [ ] Wait for run15 best checkpoint; record Kaggle score in leaderboard
+- [ ] Launch run16: warmstart best run15, `TRAIN_FILE=data/v0.13_train.jsonl`, LR=1e-4, max_steps=600
+- [ ] Submit run16 checkpoint(s); update leaderboard
+
 ## Infrastructure (complete)
 - [x] `Dockerfile.gb10` (26.04) — current primary image for all training runs
 - [x] `transformers==5.5.3` — native NemotronH KV cache fix, no `trust_remote_code`

@@ -154,6 +154,67 @@ The poster's config solves an OOM problem we already solved differently. Only on
 
 ---
 
+## 3. Follow-up: Community discussion — category weight distribution (2026-06-13)
+
+### Context
+
+A second community member (Q3) reported **0.74 LB** using a symbolic-solver-generated 8,700-row CoT corpus, stating:
+
+> *"COT formatting and possible Category weight distribution are the real challenges."*
+
+This prompted investigation of our v0.12 training data distribution.
+
+### Finding: severe category imbalance in v0.12_train.jsonl
+
+```
+python3 -c "
+import json
+from collections import Counter
+cats = [json.loads(l).get('category','?') for l in open('data/v0.12_train.jsonl')]
+for c,n in sorted(Counter(cats).items(), key=lambda x:-x[1]):
+    print(f'{n:5d}  {c}')
+"
+```
+
+| Category | Count | Share |
+|---|---|---|
+| `matching` | 4,515 | 17.7% |
+| `concatenation` | 2,851 | 11.2% |
+| `splitting` | 2,850 | 11.2% |
+| `bit_manipulation` | 2,771 | 10.9% |
+| `cipher` | 2,731 | 10.7% |
+| `gravity` | 2,340 | 9.2% |
+| `unit_conversion` | 2,257 | 8.9% |
+| `numeral` | 2,008 | 7.9% |
+| `spelling` | 1,219 | 4.8% |
+| `equation_numeric_deduce` | 961 | 3.8% |
+| `lstrip` | 300 | 1.2% |
+| `equation_numeric_guess` | 180 | 0.7% |
+| `cryptarithm_guess` | 178 | 0.7% |
+| `cryptarithm_deduce` | 170 | 0.7% |
+| `equation_numeric` | 168 | 0.7% |
+| **`equation_symbolic`** | **1** | **0.004%** |
+| **Total** | **25,500** | |
+
+**Critical issue**: `equation_symbolic` has **1 training example**. The model has essentially no gradient signal for this category. The top 3 categories (`matching`, `concatenation`, `splitting`) account for 40% of all data — stratified batching distributes them evenly across batches but does not change the total training frequency ratio.
+
+**Our `StratifiedSFTTrainer`** addresses batch-level distribution (every gradient accumulation window sees a category mix) but does not equalize total example counts per category. The model still trains on `matching` 4,515× and `equation_symbolic` 1×.
+
+### Why the 0.74 poster likely scores higher
+
+They explicitly used **symbolic solvers** to generate their corpus — almost certainly with a balanced or targeted distribution across all 14 categories. Balanced category coverage is a stronger lever than architecture or hyperparameter choices.
+
+Our v0.9 data used `cap 1500/cat` and was far more balanced. The v0.12 augmentation skewed heavily toward categories where the huikang augmenters had rich coverage (`matching`, `concatenation`, `splitting`), while leaving `equation_symbolic`, `equation_numeric`, and `cryptarithm_*` severely underrepresented.
+
+### Actions for run16
+
+- **Rebalance v0.12 data**: cap or downsample over-represented categories (≥2,000 → cap at ~1,500) and oversample or generate more examples for under-represented categories (`equation_symbolic`, `equation_numeric`, `cryptarithm_*`, `lstrip`)
+- **`equation_symbolic` is a data bug**: 1 example is insufficient. Generate synthetic examples via symbolic solver or extend from huikang augmenters before run16
+- **Target distribution**: ≥500 examples per category minimum; cap at 1,500–2,000 per category maximum
+- Run15 (currently training) uses the imbalanced v0.12 data — score will reflect this; run16 should address distribution before training
+
+---
+
 ## 2. Applicability of posted config to DGX Spark (GB10) runs
 
 ### Context

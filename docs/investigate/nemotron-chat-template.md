@@ -113,6 +113,50 @@ This is a minor data quality issue (500/16,181 = 3% of training examples). Low p
 
 ---
 
+## Format 4: origin and taxonomy
+
+"Format 4" is **not from any external citation** — it was coined within this project in `scripts/show_data_formats.py`, a diagnostic script written during the v0.4r3 regression investigation (`docs/investigate/v0.4r3-training-data-alignment.md`) to compare four training data format variants side-by-side.
+
+| Label | Description | Source |
+|---|---|---|
+| **Format 1** | v0.1 raw — bare answer, no `\boxed{}`, no `<think>` | early project data |
+| **Format 2** | v0.5 SFT — template-reasoning trace, missing `</think>` wrapper | v0.5 pipeline bug |
+| **Format 3** | kishanvavdara / huikang long CoT — has `<think>...</think>` but 3,000+ token traces | huikang corpus |
+| **Format 4** | **CORRECT target** — `{trace}\n</think>\n\boxed{}`, aligned to Nemotron-H chat template | this investigation |
+
+"Format 4" is simply the 4th item enumerated in that script. The term became canonical at `9376afc feat(v0.9): add SFT pipeline — Format 4, 14 categories, base model` — the commit that introduced the v0.9 training pipeline using the correct format.
+
+### Why Formats 1–3 were wrong: the v0.4r3 regression
+
+Score history that triggered the investigation: **v0.1=0.57 → v0.4-r1=0.49 → v0.4-r2=0.50 → v0.4-r3=0.48** — three successive patches made the score *worse*.
+
+Full root-cause analysis is in `docs/investigate/v0.4r3-training-data-alignment.md`. The three problems found:
+
+**Problem 1 — Long CoT hits Kaggle's token limit (Format 3)**
+
+The huikang corpus (which kishanvavdara traces derive from) uses 3,000+ token systematic hypothesis-search reasoning chains. Kaggle's evaluation runner has a fixed `max_new_tokens` budget. A model trained on Format 3 attempts to generate the full chain before reaching `\boxed{}`, hits the limit mid-chain, and never outputs an answer. This is the primary reason Format 3 fails in competition.
+
+**Problem 2 — Training prompt has `\boxed{}` instruction; eval prompt does not**
+
+For the 9 "boxed" categories (bit, cipher, numeral, unit, equation…), the huikang corpus appended:
+```
+Please put your final answer inside `\boxed{}`. For example: `\boxed{your answer}`
+```
+The competition eval runner sends the raw problem without this instruction. The model learned to rely on this trigger and would not emit `\boxed{}` without it. Augmenter categories never had the instruction at all, so they scored 0 across all v0.4 runs.
+
+**Problem 3 — Format inconsistency across the corpus**
+
+Some huikang/kishanvavdara entries had both `<think>` and `</think>` (template case 3, left as-is), others had only `</think>` (template case 2), and v0.1 had neither (template case 1, `<think></think>` prepended). The model saw three different assistant-turn structures and learned none of them reliably.
+
+### Resolution: Format 4
+
+The v0.5 plan adopted kuangyicheng's method (the 0.87 notebook): short responses, competition-matched prompt format, warmstart from huikang's v27 adapter. The correct assistant content structure — `{concise trace}\n</think>\n\boxed{answer}` with no `<think>` opener — is what this doc calls Format 4. It:
+- Keeps traces short enough to complete within `max_new_tokens`
+- Aligns with the Nemotron-H chat template's case-2 path (see §2 above)
+- Does not depend on a `\boxed{}` instruction in the user prompt
+
+---
+
 ## Summary
 
 | Claim | Accurate? |

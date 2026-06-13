@@ -82,7 +82,7 @@ Side-by-side comparison of poster's config vs our two platforms:
 | `bf16` | True | True | True |
 | `save_strategy` | no | no (rolling ckpt callback) | no (rolling ckpt callback) |
 | `out_proj` in targets | yes | **no** (dead path) | **no** (dead path) |
-| `gate_proj` in targets | no | yes | yes |
+| `gate_proj` in targets | no | yes (no-op) | yes (no-op) |
 | per-expert MoE LoRA | no | no (Unsloth fused, dropped) | **yes** (11,776 keys, 878M params) |
 | trainable params | ~27M (est.) | ~27M | **878M** |
 
@@ -109,6 +109,8 @@ Side-by-side comparison of poster's config vs our two platforms:
 **The poster's OOM fix**: They describe `attn_implementation="eager"` + their SFTConfig as what "finally allowed" 8192 training. We solved the same problem differently: Unsloth's NemotronH native GC bypass (`_set_gradient_checkpointing()`) + `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`. These are equivalent memory solutions; their approach is not novel for us.
 
 **`out_proj` in target_modules**: Poster includes it. We deliberately exclude it — Unsloth's Mamba fast-path `UnslothCheckpointFunction` guard fires because the SSM scan output does not carry `requires_grad=True`, producing zero gradient for `out_proj` throughout training. See [[mamba-out-proj-lora-dead-path]] for full root cause.
+
+**`gate_proj` in target_modules**: We include it; poster omits it. Confirmed no-op — `adapter_model.safetensors` from both `adapter_v12_spark_ckpt` and `adapter_v9_run13_ckpt` contain zero `gate_proj` keys. NemotronH has no linear named `gate_proj` (neither in shared experts nor routed experts); PEFT silently skips unmatched target strings. Safe to remove from `target_modules` in run15 with no effect on adapter size or score.
 
 ### Actions Taken
 

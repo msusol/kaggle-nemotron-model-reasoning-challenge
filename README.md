@@ -176,10 +176,10 @@ See [`docs/plans/leaderboard.md`](docs/plans/leaderboard.md) for the full run hi
 
 | Version | Kaggle Score | Notes |
 |---|---|---|
-| v0.9-run13-step500 | **0.58** ★ | First valid per-expert LoRA submission — best overall |
-| v0.9-run13-step700 | 0.57 | Epoch 3 boundary |
+| v0.9-run13-step100 | 0.45 | Expert LoRA undertrained at step 100 |
+| v0.9-run13-step500 | **0.58** ★ | Epoch 2 boundary — best overall |
 | v0.9-run13-step600 | 0.55 | Mid-epoch oscillation |
-| v0.9-run13-step100 | 0.45 | Expert LoRA undertrained |
-| v0.9-run13-step800 | pending | Best train-loss checkpoint |
-| v0.9-run13-step1000 | pending | Final checkpoint |
-| v0.12-run14 | — | Active — ~23h remaining |
+| v0.9-run13-step700 | 0.57 | Epoch 3 boundary recovers |
+| v0.9-run13-step800 | pending | Best checkpoint train loss (0.1265) |
+| v0.9-run13-step1000 | pending | Final checkpoint (0.1220) |
+| v0.12-run14 | — | Active — warmstart run13, 25,500 rows |

@@ -4,7 +4,7 @@ Aggregated findings from competition discussion threads. Each section covers one
 
 | Section | Thread | Poster | Key topic |
 |---|---|---|---|
-| 1 | [#707987](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/707987) | Buzz shocker | SFTConfig hparams, RTX Pro 6000 OOM fix |
+| 1 | [#707987](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/707987) | Buzz shocker | SFTConfig hparams, RTX Pro 6000 OOM fix; Q5 follow-up: 8192 tok claim debunked, gate_proj confirmed |
 | 2 | [#707987](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/707987) follow-up | Q3 poster | Category weight distribution, 0.74 LB via symbolic solvers |
 | 3 | [#684251](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/684251) | DaoHe Liu | Unsloth MoE fused keys vs per-expert LoRA; `gate_proj` SiLU root cause |
 
@@ -163,6 +163,21 @@ The poster's config solves an OOM problem we already solved differently. Only on
   - Either way: `max_grad_norm=1.0` is not a lever here.
 
 - **`lora_alpha` ablation**: Low priority. Effective LoRA scale matches poster when `r=32`. Not a factor in the run14 plateau.
+
+- **Follow-up Q5 (2026-06-13) — Buzz shocker on `gate_proj` and 8192 tokens**: Poster replied with two claims:
+  1. *"I'm not sure about the gate_proj"* — consistent with our finding; architecturally absent in NemotronH MoE (SiLU, no gate projection).
+  2. *"top teams are def using 8192 tokens"* — **contradicted by the evaluator source**. We re-pulled `metric/nvidia-nemotron-metric` (2026-06-13) and confirmed `max_model_len=4096` is unchanged. Training at 8192 produces examples the evaluator truncates to 4096 — the think chain is cut before `\boxed{}`, scoring 0 on those problems. Our seq=4096 (ADR-0006) remains correct. See evaluator defaults below:
+
+  | Parameter | Current value |
+  |---|---|
+  | `max_model_len` | **4096** |
+  | `max_tokens` | **3584** |
+  | `max_lora_rank` | **32** |
+  | `temperature` | 1.0 |
+  | `top_p` | 1.0 |
+  | `enable_thinking` | True |
+
+  Poster also notes token-proportional training (per-category loss weighting) "requires external pytorch code that slows down training." Our `StratifiedSFTTrainer` does NOT do loss weighting — it is a zero-cost index reordering (pre-computed once at startup). No training overhead. However, its value is minimal given the v0.12 category imbalance (4,515 `matching` vs 1 `equation_symbolic`) — stratified batching ensures category mix per batch but does not change total training frequency per category.
 
 ---
 

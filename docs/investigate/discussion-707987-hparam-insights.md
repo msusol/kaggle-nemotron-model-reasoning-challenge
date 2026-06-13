@@ -52,6 +52,23 @@ Implied: `lora_alpha=128` (stated in comment), `r` unspecified but likely 16 or 
 
 `trust_remote_code=True` (poster): loads old `modeling_nemotron_h.py` from the model repo, which has broken KV cache at inference (~20x generation slowdown). We deliberately omit it so transformers ≥5.3.0 uses its native NemotronH implementation. See discussion #690161.
 
+**Platform difference — `trust_remote_code` had opposite requirements on each platform:**
+
+| | DGX Spark (GB10) | RTX Pro 6000 (Kaggle) |
+|---|---|---|
+| Environment | Docker image, `transformers 5.5.3` installed fresh | Kaggle base env, older transformers pre-5.3.0 |
+| Omit `trust_remote_code` | ✅ Works immediately — native `NemotronHForCausalLM` | ❌ Hangs — transformers shows interactive "Do you wish to run custom code?" prompt |
+| `trust_remote_code=True` | ✅ Also works (but loads buggy file) | ✅ Required to avoid hang — loads buggy `modeling_nemotron_h.py` |
+| KV cache bug impact | N/A during SFT (no generation loop) | N/A during SFT (no generation loop) |
+
+**Why the KV cache bug doesn't affect SFT training:** The broken cache in `modeling_nemotron_h.py` (name mismatch: `past_key_values` vs `cache_params`) only fires during autoregressive generation — each token recomputes the full sequence instead of using cached states. SFT uses teacher-forced forward passes with no generation loop, so `trust_remote_code=True` is harmless for training loss but would be catastrophic for GRPO rollouts and submission inference.
+
+**Why Kaggle notebooks temporarily required `trust_remote_code=True`:** Two failed attempts to avoid it:
+1. Pin `transformers==5.5.3` → pip conflicts with Kaggle base env; even when install succeeded, the already-loaded module wasn't replaced without a kernel restart
+2. Omit without upgrading → interactive prompt hangs the notebook indefinitely
+
+`trust_remote_code=True` was restored in Kaggle notebooks (`dade990`, Jun 3) and permanently removed (`7f44792`, Jun 7) once Kaggle's base environment shipped `transformers ≥ 5.3.0`.
+
 `max_seq_length` not passed (ours): Unsloth caps `model.max_seq_length` to 2048 on NemotronH regardless of what is passed here. We skip it and apply a post-load override (`model.max_seq_length = MAX_SEQ_LENGTH`) which is the only path that actually sticks. Passing it in `from_pretrained` is a no-op for this model class.
 
 **`SFTConfig` comparison:**

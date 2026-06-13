@@ -151,33 +151,42 @@ None — investigation only. No config changes made.
 
 The poster's config solves an OOM problem we already solved differently. Only one parameter differs meaningfully (`max_grad_norm=1.0` vs our `1e9`). Deferred as a stability lever for future runs if loss instability appears.
 
-### Follow-ups
+### Follow-up: `max_grad_norm=1.0` irrelevant for run15
 
-- **`max_grad_norm=1.0` is irrelevant for run15**: Run14 peak grad_norm was **0.1759** across all 300 steps — clipping at 1.0 would never have triggered. The plateau at loss 0.285 is a data/optimizer convergence issue, not a gradient explosion issue. Do not change `max_grad_norm` for run15.
+Run14 peak grad_norm was **0.1759** across all 300 steps — clipping at 1.0 would never have triggered. The plateau at loss 0.285 is a data/optimizer convergence issue, not a gradient explosion issue. Do not change `max_grad_norm` for run15.
 
-- **Adam params identical — no action needed**: `beta1=0.9`, `beta2=0.95`, `epsilon=1e-8`, `weight_decay=0.0` all match the poster exactly. No changes warranted.
+### Follow-up: Adam params identical — no action needed
 
-- **Run15 planning**: The run14 plateau (loss 0.285 from step 80, vs run13's 0.122 at step 1000) likely reflects LR=1e-4 being too conservative for warmstart on new data. Run13→run14 warmstart on v0.12 data hit a local minimum immediately. Candidate directions once run14 score is known:
-  - **If run14 scores ≥ 0.58**: continue v0.12 approach at higher LR (2e-4 warmstart or even fresh start on v0.12)
-  - **If run14 scores < 0.58**: the v0.12 augmented data hurts; revert to v0.9 data and extend training further (run15 = longer run13 continuation)
-  - Either way: `max_grad_norm=1.0` is not a lever here.
+`beta1=0.9`, `beta2=0.95`, `epsilon=1e-8`, `weight_decay=0.0` all match the poster exactly. No changes warranted.
 
-- **`lora_alpha` ablation**: Low priority. Effective LoRA scale matches poster when `r=32`. Not a factor in the run14 plateau.
+### Follow-up: run15 planning
 
-- **Follow-up Q5 (2026-06-13) — Buzz shocker on `gate_proj` and 8192 tokens**: Poster replied with two claims:
-  1. *"I'm not sure about the gate_proj"* — consistent with our finding; architecturally absent in NemotronH MoE (SiLU, no gate projection).
-  2. *"top teams are def using 8192 tokens"* — **contradicted by the evaluator source**. We re-pulled `metric/nvidia-nemotron-metric` (2026-06-13) and confirmed `max_model_len=4096` is unchanged. Training at 8192 produces examples the evaluator truncates to 4096 — the think chain is cut before `\boxed{}`, scoring 0 on those problems. Our seq=4096 (ADR-0006) remains correct. See evaluator defaults below:
+The run14 plateau (loss 0.285 from step 80, vs run13's 0.122 at step 1000) likely reflects LR=1e-4 being too conservative for warmstart on new data. Run13→run14 warmstart on v0.12 data hit a local minimum immediately. Candidate directions once run14 score is known:
+- **If run14 scores ≥ 0.58**: continue v0.12 approach at higher LR (2e-4 warmstart or even fresh start on v0.12)
+- **If run14 scores < 0.58**: the v0.12 augmented data hurts; revert to v0.9 data and extend training further (run15 = longer run13 continuation)
+- Either way: `max_grad_norm=1.0` is not a lever here.
 
-  | Parameter | Current value |
-  |---|---|
-  | `max_model_len` | **4096** |
-  | `max_tokens` | **3584** |
-  | `max_lora_rank` | **32** |
-  | `temperature` | 1.0 |
-  | `top_p` | 1.0 |
-  | `enable_thinking` | True |
+### Follow-up: `lora_alpha` ablation
 
-  Poster also notes token-proportional training (per-category loss weighting) "requires external pytorch code that slows down training." Our `StratifiedSFTTrainer` does NOT do loss weighting — it is a zero-cost index reordering (pre-computed once at startup). No training overhead. However, its value is minimal given the v0.12 category imbalance (4,515 `matching` vs 1 `equation_symbolic`) — stratified batching ensures category mix per batch but does not change total training frequency per category.
+Low priority. Effective LoRA scale matches poster when `r=32`. Not a factor in the run14 plateau.
+
+### Follow-up Q5 — Buzz shocker on `gate_proj` and 8192 tokens (2026-06-13)
+
+Poster replied with two claims:
+
+1. *"I'm not sure about the gate_proj"* — consistent with our finding; architecturally absent in NemotronH MoE (SiLU, no gate projection).
+2. *"top teams are def using 8192 tokens"* — **contradicted by the evaluator source**. We re-pulled `metric/nvidia-nemotron-metric` (2026-06-13) and confirmed `max_model_len=4096` is unchanged. Training at 8192 produces examples the evaluator truncates to 4096 — the think chain is cut before `\boxed{}`, scoring 0 on those problems. Our seq=4096 (ADR-0006) remains correct.
+
+| Parameter | Current value |
+|---|---|
+| `max_model_len` | **4096** |
+| `max_tokens` | **3584** |
+| `max_lora_rank` | **32** |
+| `temperature` | 1.0 |
+| `top_p` | 1.0 |
+| `enable_thinking` | True |
+
+Poster also notes token-proportional training (per-category loss weighting) "requires external pytorch code that slows down training." Our `StratifiedSFTTrainer` does NOT do loss weighting — it is a zero-cost index reordering (pre-computed once at startup). No training overhead. However, its value is minimal given the v0.12 category imbalance (4,515 `matching` vs 1 `equation_symbolic`) — stratified batching ensures category mix per batch but does not change total training frequency per category.
 
 ---
 

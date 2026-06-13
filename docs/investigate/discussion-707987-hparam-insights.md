@@ -4,7 +4,7 @@ Aggregated findings from competition discussion threads. Each section covers one
 
 | Section | Thread | Poster | Key topic |
 |---|---|---|---|
-| 1 | [#707987](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/707987) | Buzz shocker | SFTConfig hparams, RTX Pro 6000 OOM fix; Q5 follow-up: 8192 tok claim debunked, gate_proj confirmed |
+| 1 | [#707987](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/707987) | Buzz shocker | SFTConfig hparams, RTX Pro 6000 OOM fix; Q5: 8192 tok debunked, gate_proj confirmed, 6 buckets vs 16 categories |
 | 2 | [#707987](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/707987) follow-up | Q3 poster | Category weight distribution, 0.74 LB via symbolic solvers |
 | 3 | [#684251](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/discussion/684251) | DaoHe Liu | Unsloth MoE fused keys vs per-expert LoRA; `gate_proj` SiLU root cause |
 
@@ -187,6 +187,33 @@ Poster replied with two claims:
 | `enable_thinking` | True |
 
 Poster also notes token-proportional training (per-category loss weighting) "requires external pytorch code that slows down training." Our `StratifiedSFTTrainer` does NOT do loss weighting — it is a zero-cost index reordering (pre-computed once at startup). No training overhead. However, its value is minimal given the v0.12 category imbalance (4,515 `matching` vs 1 `equation_symbolic`) — stratified batching ensures category mix per batch but does not change total training frequency per category.
+
+### Follow-up Q5 — Official number of categories (2026-06-13)
+
+Buzz shocker asked what the official number of categories is, listing 7: `cryptarithm`, `equation_numeric`, `bit_manipulation`, `cipher`, `gravity`, `unit_conversion`, `numeral`.
+
+**Finding**: The official competition data files (`train.csv`, `test.csv`) contain **no category column** — problem types are never disclosed by the competition. The 7 Buzz shocker identified are the "obvious" types visible from problem prompt wording. Huikang's corpus analysis revealed **16 fine-grained categories** mapping into **6 scoring buckets**:
+
+| Bucket | Fine-grained categories (huikang) |
+|---|---|
+| `bit_like` | `bit_manipulation` |
+| `cipher_like` | `cipher`, `spelling` |
+| `numeral_like` | `numeral` |
+| `unit_like` | `unit_conversion` |
+| `equation_like` | `equation_numeric`, `cryptarithm_guess`, `cryptarithm_deduce`, `equation_numeric_deduce`, `equation_numeric_guess`, `equation_symbolic` |
+| `other` | `matching`, `splitting`, `concatenation`, `gravity`, `lstrip` |
+
+The 7 Buzz shocker listed miss the **test-only hidden categories** that don't appear in standard training data: `matching`, `splitting`, `concatenation`, `spelling`, `lstrip`, `equation_symbolic`. Training without those means scoring 0 on a large fraction of test problems regardless of hyperparameter tuning. This is the core value of the huikang corpus — it revealed the existence of hidden test problem types.
+
+Confirmed from v0.9 training data bucket distribution:
+```
+5973  other          (matching, splitting, concatenation, gravity, lstrip)
+2071  cipher_like    (cipher, spelling)
+1500  bit_like       (bit_manipulation)
+1500  numeral_like   (numeral)
+1500  unit_like      (unit_conversion)
+1186  equation_like  (equation_numeric, cryptarithm_*, equation_numeric_*)
+```
 
 ---
 

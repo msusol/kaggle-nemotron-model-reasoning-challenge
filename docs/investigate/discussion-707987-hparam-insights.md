@@ -202,9 +202,15 @@ for c,n in sorted(Counter(cats).items(), key=lambda x:-x[1]):
 
 ### Why the 0.74 poster likely scores higher
 
-They explicitly used **symbolic solvers** to generate their corpus — almost certainly with a balanced or targeted distribution across all 14 categories. Balanced category coverage is a stronger lever than architecture or hyperparameter choices.
+They used **their own symbolic solvers** to generate an 8,700-row corpus — the key word being *their own*, with presumably balanced coverage across all categories.
 
-Our v0.9 data used `cap 1500/cat` and was far more balanced. The v0.12 augmentation skewed heavily toward categories where the huikang augmenters had rich coverage (`matching`, `concatenation`, `splitting`), while leaving `equation_symbolic`, `equation_numeric`, and `cryptarithm_*` severely underrepresented.
+We also use programmatic/algorithmic generators — the huikang repo's `augmenters/` directory (`augmenters/matching.py`, `augmenters/splitting.py`, `augmenters/concatenation.py`, etc.) are exactly this: symbolic problem generators with known answers. The method is the same class of tool. The difference is **coverage**:
+
+- Huikang augmenters exist for `matching`, `concatenation`, `splitting`, `bit_manipulation`, `cipher`, `gravity`, `unit_conversion`, `numeral` — these are the categories with thousands of examples
+- `equation_symbolic` has **no huikang augmenter** — the v0.12 plan explicitly notes `| equation_symbolic | 1 | skip (no augmenter) |`
+- `lstrip`, `equation_numeric`, `cryptarithm_*` have limited or no augmenters
+
+Our v0.9 data used `cap 1500/cat` and was far more balanced. The v0.12 augmentation skewed heavily toward categories where the huikang augmenters had rich coverage, while the underrepresented categories were left at their original v0.9 counts or lower.
 
 ### Actions for run16
 

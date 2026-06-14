@@ -4,6 +4,10 @@ https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge
 
 Full pipeline for training a Nemotron-3-Nano-30B LoRA adapter on a DGX Spark GB10, then packaging a Kaggle-compatible `submission.zip` with per-expert MoE LoRA keys.
 
+## Final Result
+
+**Best public score: 0.67** — achieved at run17 steps 100, 300, and 500 (all 16 categories, v0.14 data, warmstart from run15-step200). Steps 200 and 400 scored 0.66. The alternating pattern and ceiling at 0.67 across all three checkpoints indicates the binding constraint is the data distribution, not training duration or LR schedule. A score of +0.03 over all v0.12 runs (0.64), driven primarily by adding the 3 missing categories and per-expert MoE LoRA in PEFT-compatible format.
+
 ## Methodology
 
 This project applies the **vibe planning** methodology to competitive ML — using Claude Code

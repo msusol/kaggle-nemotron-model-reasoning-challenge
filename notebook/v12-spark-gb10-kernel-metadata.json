@@ -1,0 +1,15 @@
+{
+  "id": "gdataranger/nemotron-v0-12-sft-training-dgx-spark-gb10",
+  "title": "Nemotron v0.12 SFT Training DGX Spark GB10",
+  "code_file": "v12_train_spark_gb10.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": false,
+  "enable_gpu": false,
+  "enable_tpu": false,
+  "enable_internet": false,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

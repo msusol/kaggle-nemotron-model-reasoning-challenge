@@ -63,7 +63,7 @@ Unsloth's fused kernels.
 **Key finding**: model overfit on 4 epochs of v0.9 data (seq=2048). Cured by v0.12's broader
 augmented distribution.
 
-![run13 loss curve](docs/images/run13_loss_curve.png)
+![warmstart training chain](docs/images/training_warmstart_chain.png)
 
 ### v0.12 run14 — augmented data, warmstart from run13 (complete)
 
@@ -84,26 +84,36 @@ LR raised from 1e-4 → 2e-4 with fresh Adam state. Loss plateau ~0.273–0.299 
 with no clear downward trend. Submitted step100 and step200 checkpoints; stopped at step200 to
 preserve GPU time for run16 on corrected v0.13 data.
 
-### v0.13 run16 — balanced + token-filtered data, warmstart from run15-step200 (active)
+### v0.13 run16 — skipped after step 17
 
-600 steps · seq=4096 · lr=1e-4 · warmstart: run15 step-200
+run16 started on v0.13 data (11,300 examples, 13/16 categories) but was stopped at step 17.
+Root cause: v0.13 completely omits `spelling`, `equation_numeric_deduce`, and `equation_numeric_guess`
+— every huikang trace for these categories exceeds 4,096 tokens (medians: 4,884 / 5,874 / 6,148).
+With 2 days to deadline, 19 hours on a dataset missing 3 test categories was not worth it.
 
-**v0.13 dataset** (11,300 examples, all ≤ 4,096 tokens): token filter applied *before* balancing
-so the category distribution in the file exactly matches what training sees. Key finding from
-analysis: naive balance-then-filter silently drops 42% of examples; several categories (spelling,
-equation_numeric_deduce, equation_numeric_guess) have *all* huikang traces > 4,096 tokens and are
-absent from this run entirely.
+See [`docs/plans/v0.13-balanced-data-plan.md`](docs/plans/v0.13-balanced-data-plan.md) for the
+full dataset build pipeline and risk analysis.
+
+### v0.14 run17 — all 16 categories, warmstart from run15-step200 (active)
+
+500 steps · seq=4096 · lr=1e-4 · warmstart: run15 step-200
+
+**v0.14 dataset** (12,800 examples, all 16 categories): adds short synthetic traces for the 3
+categories absent from v0.13. All huikang traces for these cats exceed 4,096 tokens; synthetic
+generators produce ≤ 500-token CoT traces in Format 4.
 
 | Category | Count | Natural | Notes |
 |---|---|---|---|
 | cipher, gravity, matching, numeral, splitting, unit_conversion | 1,500 each | varied | capped |
 | equation_symbolic | 500 | 500 | synthetic rule-inference puzzles |
-| bit_manipulation | 300 | **28** | repeated 10.7× — most huikang traces > 4,096 tok |
+| spelling | 500 | 500 | **new** synthetic ~150 tok — concat words → –char–by–char– |
+| equation_numeric_deduce | 500 | 500 | **new** synthetic ~300 tok — operator→{add, abs\_diff} |
+| equation_numeric_guess | 500 | 500 | **new** synthetic ~350 tok — operator→{add, abs\_diff, concat} |
+| bit_manipulation | 300 | **28** | repeated 10.7× — 99% of huikang traces > 4,096 tok |
 | concatenation, cryptarithm_*, equation_numeric, lstrip | 300 each | 85–300 | repeated |
-| spelling, eq_num_deduce, eq_num_guess | **0** | 0 | all traces > 4,096 tok |
 
-See [`docs/plans/v0.13-balanced-data-plan.md`](docs/plans/v0.13-balanced-data-plan.md) for the
-full dataset build pipeline and risk analysis.
+See [`docs/plans/v0.14-capped-data-plan.md`](docs/plans/v0.14-capped-data-plan.md) for the
+full dataset build pipeline, drop analysis, and run17 parameters.
 
 ## Repository layout
 
@@ -118,33 +128,42 @@ full dataset build pipeline and risk analysis.
 │   ├── v0.12_train.jsonl           # 25,500 examples — v0.9 + augmented (gitignored)
 │   ├── v0.12_augmented.jsonl       # 11,770 net-new augmented examples (gitignored)
 │   ├── v0.13_merged.jsonl          # v0.12 + 500 synthetic eq_symbolic (gitignored)
-│   ├── v0.13_train.jsonl           # 11,300 examples — token-filtered + balanced (gitignored)
+│   ├── v0.13_train.jsonl           # 11,300 examples — token-filtered, 13/16 cats (gitignored)
+│   ├── v0.14_merged.jsonl          # v0.12 + 4 synthetic generators, 27,500 rows (gitignored)
+│   ├── v0.14_train.jsonl           # 12,800 examples — token-filtered, all 16 cats (gitignored)
 │   ├── v09-training-data/          # Kaggle dataset metadata → gdataranger/nemotron-v09-training-data
 │   ├── v012-training-data/         # Kaggle dataset metadata → gdataranger/nemotron-v012-training-data
-│   └── v013-training-data/         # Kaggle dataset metadata → gdataranger/nemotron-v013-training-data
+│   ├── v013-training-data/         # Kaggle dataset metadata → gdataranger/nemotron-v013-training-data
+│   └── v014-training-data/         # Kaggle dataset metadata → gdataranger/nemotron-v014-training-data
 ├── docs/
 │   ├── images/
 │   │   ├── dgx-spark-dashboard.png
-│   │   └── run13_loss_curve.png    # run13 full 1000-step loss curve
+│   │   └── training_warmstart_chain.png  # v0.9→v0.12→v0.14 loss curve
 │   ├── investigate/                # root cause analyses, ADRs
 │   └── plans/
 │       ├── leaderboard.md          # full run history and Kaggle scores
 │       ├── v0.12-reasoner-data-spark-sft.md  # v0.12 training journey
-│       ├── v0.13-balanced-data-plan.md       # v0.13 dataset build + run16
+│       ├── v0.13-balanced-data-plan.md       # v0.13 dataset build (13/16 cats — run16 skipped)
+│       ├── v0.14-capped-data-plan.md         # v0.14 dataset build + run17 (all 16 cats)
 │       └── TODO.md
 ├── output/
 │   ├── adapter_v9_run13_ckpt/      # run13 final checkpoint
 │   ├── adapter_v12_spark_ckpt/     # run14 step-300 checkpoint (0.64 — warmstart for run15)
-│   ├── adapter_v12_run15_step200/  # run15 step-200 snapshot (warmstart for run16)
-│   └── adapter_v13_run16_ckpt/     # run16 rolling checkpoint (active — every 100 steps)
+│   ├── adapter_v12_run15_step200/  # run15 step-200 snapshot (warmstart for run17)
+│   └── adapter_v14_run17_ckpt/     # run17 rolling checkpoint (active — every 100 steps)
 └── scripts/
     ├── train_v9_sft.py             # SFT trainer — warmstart, per-expert LoRA, expert_lora_weights.pt
     ├── run_train_v9.sh             # Docker runner for v0.9 runs
     ├── run_train_v12.sh            # Docker runner for v0.12 runs
-    ├── run_train_v13.sh            # Docker runner for v0.13/run16 (active)
+    ├── run_train_v13.sh            # Docker runner for v0.13/run16 (stopped step 17)
+    ├── run_train_v14.sh            # Docker runner for v0.14/run17 (active)
     ├── package_submission.sh       # convert expert_lora_weights.pt → 11,776 PEFT keys + zip
     ├── generate_reasoner_data.py   # generate augmented examples from huikang reasoners
-    ├── generate_equation_symbolic.py  # synthetic equation_symbolic rule-inference puzzles
+    ├── generate_equation_symbolic.py     # synthetic equation_symbolic rule-inference puzzles
+    ├── generate_spelling.py              # synthetic spelling puzzles — concat + EN DASH rule
+    ├── generate_equation_numeric_deduce.py  # synthetic eq_num_deduce — {add, abs_diff}
+    ├── generate_equation_numeric_guess.py   # synthetic eq_num_guess — {add, abs_diff, concat}
+    ├── generate_v14_data.sh        # end-to-end v0.14 build: generate → merge → filter → cap
     ├── balance_dataset.py          # token-filter + cap/repeat balancing (--max-tokens flag)
     ├── prepare_v09_data.py         # build v0.9_train.jsonl (Format 4, 16 categories)
     └── services.sh                 # pause/resume non-training containers
@@ -152,35 +171,35 @@ full dataset build pipeline and risk analysis.
 
 ## Commands
 
-### Train (run16 — active)
+### Train (run17 — active)
 
 ```zsh
 # Always in tmux — never run directly
-tmux new -s train_v13
+tmux new -s train_v14
 WARMSTART_ADAPTER=output/adapter_v12_run15_step200 \
-RUN_NAME=v13_run16 \
-bash scripts/run_train_v13.sh
+RUN_NAME=v14_run17 \
+bash scripts/run_train_v14.sh
 ```
 
 Verify warmstart in log: `[moe-lora] Warmstart: loaded 92 expert LoRA weights`  
-Monitor: `tail -f output/train_v13_run16.log`
+Monitor: `tail -f output/train_v14_run17.log`
 
 ### Package and submit
 
 ```zsh
 # Package from rolling checkpoint (run on HOST, not inside Docker)
 bash scripts/package_submission.sh \
-  output/adapter_v12_spark_ckpt \
-  /tmp/sub_v12_step<N>
+  output/adapter_v14_run17_ckpt \
+  /tmp/sub_v14_step<N>
 
 # Submit
 kaggle competitions submit \
   -c nvidia-nemotron-model-reasoning-challenge \
-  -f /tmp/sub_v12_step<N>/submission.zip \
-  -m "v0.12 step-<N>: 878M warmstart run13, 25500 rows augmented"
+  -f /tmp/sub_v14_step<N>/submission.zip \
+  -m "v0.14 run17 step-<N>: all 16 cats, warmstart run15-step200"
 ```
 
-Package from the **rolling copy** (`output/adapter_v12_spark_ckpt`) immediately after each
+Package from the **rolling copy** (`output/adapter_v14_run17_ckpt`) immediately after each
 checkpoint notification — it's overwritten every 100 steps.
 
 ### Regenerate v0.12 training data
@@ -214,4 +233,5 @@ See [`docs/plans/leaderboard.md`](docs/plans/leaderboard.md) for the full run hi
 | v0.12-run14-step300 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | ~0.285 | **0.64 ★** | New best — warmstart run13, v0.12 augmented data |
 | v0.12-run15-step100 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | 0.2738 | 0.64 | Warmstart run14, lr=2e-4 — plateau from step 50, no improvement vs run14 |
 | v0.12-run15-step200 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | 0.2823 | 0.64 | Run15 final — stopped at step 200; same score as run14 |
-| v0.13-run16 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | — | **active** | Warmstart run15-step200, v0.13 balanced+filtered data (11,300 rows) |
+| v0.13-run16 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | — | skipped | Stopped step 17 — v0.13 missing 3 of 16 categories; pivoted to v0.14 |
+| v0.14-run17 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | — | **active** | Warmstart run15-step200, v0.14 all 16 cats, 12,800 rows; 500 steps planned |

@@ -49,3 +49,5 @@ adapters/**/README.md
 .idea/
 submission.zip
 submission/
+warmstart/
+nemotron-v0-9-sft-training-rtx-pro-6000.log

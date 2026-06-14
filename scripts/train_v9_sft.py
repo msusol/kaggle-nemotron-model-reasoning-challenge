@@ -215,7 +215,7 @@ def main():
     _expert_lora_r = args.lora_r
     _expert_lora_scaling = args.lora_alpha / args.lora_r
 
-    if _unsloth_loaded and not args.warmstart_adapter:
+    if _unsloth_loaded:
         import math as _math
         import torch.nn as _nn_lora
         try:
@@ -323,10 +323,26 @@ def main():
     # ── Step 2b: apply attention/MLP LoRA via FastLanguageModel ───────────────────
     if args.warmstart_adapter:
         from peft import PeftModel
+        import os as _os_ws
         print(f"Warmstart: loading adapter from {args.warmstart_adapter}", flush=True)
         model = PeftModel.from_pretrained(model, args.warmstart_adapter, is_trainable=True)
         _lora_via_unsloth = _unsloth_loaded
         print("Adapter loaded and set to trainable (warmstart mode)", flush=True)
+        # Load expert LoRA weights from warmstart directory if present
+        _elo_ws_path = _os_ws.path.join(args.warmstart_adapter, "expert_lora_weights.pt")
+        if _os_ws.path.exists(_elo_ws_path) and _n_expert_lora > 0:
+            _elo_ws = torch.load(_elo_ws_path, map_location="cuda", weights_only=True)
+            _elo_ws_loaded = 0
+            for _mn_ws, _m_ws in model.named_modules():
+                for _k_ws in ("lora_A_up", "lora_B_up", "lora_A_down", "lora_B_down"):
+                    _fk_ws = f"{_mn_ws}.{_k_ws}"
+                    if _fk_ws in _elo_ws and hasattr(_m_ws, _k_ws):
+                        _tgt_ws = getattr(_m_ws, _k_ws)
+                        _tgt_ws.data.copy_(_elo_ws[_fk_ws].to(dtype=_tgt_ws.dtype, device=_tgt_ws.device))
+                        _elo_ws_loaded += 1
+            print(f"[moe-lora] Warmstart: loaded {_elo_ws_loaded} expert LoRA weights from {_elo_ws_path}", flush=True)
+        elif _n_expert_lora > 0:
+            print(f"[moe-lora] Warmstart: no expert_lora_weights.pt in {args.warmstart_adapter} — using fresh init", flush=True)
     elif _unsloth_loaded:
         # Monkey-patch get_moe_target_parameters → [] so FastLanguageModel.get_peft_model
         # does NOT create peft ParamWrapper for the expert 3D params handled above.

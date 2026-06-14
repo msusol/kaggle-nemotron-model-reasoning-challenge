@@ -10,6 +10,20 @@ Comparison mode (--compare):
       "v0.2-cot:output/train_20260528_211916.log" \
       "v0.3-filtered:output/train_cot_v3_20260529_075411.log" \
       --out docs/images/training_comparison_v03.png
+
+Warmstart chain mode (--compare + --split N):
+  python scripts/plot_training.py --compare \
+      "v0.9-run13:output/train_v9_run13.log" \
+      "v0.12-run14:output/train_v12_spark.log" \
+      "v0.12-run15:output/train_v12_run15.log" \
+      "v0.14-run17:output/train_v14_run17.log" \
+      --split 1 \
+      --max-tokens 2048 4096 4096 4096 \
+      --out docs/images/training_warmstart_chain.png
+
+  --split N puts the first N runs on the left y-axis (e.g. run13 with its
+  different loss scale); the remaining runs share the right y-axis.
+  --max-tokens annotates each run's max sequence length in the legend.
 """
 
 import argparse
@@ -20,14 +34,27 @@ from pathlib import Path
 
 
 def parse_log(path: Path) -> list[dict]:
-    pattern = re.compile(r"\{[^{}]*'loss'[^{}]*\}")
+    """Parse loss records from a training log.
+
+    Extracts step from the tqdm progress bar (| N/MAX [...]) on the preceding
+    line and attaches it as record['step']. Falls back to epoch-only if no
+    tqdm line is found before a loss record.
+    """
+    tqdm_pat = re.compile(r"\|\s+(\d+)/\d+\s+\[")
+    loss_pat = re.compile(r"\{[^{}]*'loss'[^{}]*\}")
     records = []
+    last_step = None
     with open(path) as f:
         for line in f:
-            for match in pattern.finditer(line):
+            m = tqdm_pat.search(line)
+            if m:
+                last_step = int(m.group(1))
+            for match in loss_pat.finditer(line):
                 try:
                     record = ast.literal_eval(match.group())
                     if isinstance(record, dict) and "loss" in record:
+                        if last_step is not None:
+                            record["step"] = last_step
                         records.append(record)
                 except (ValueError, SyntaxError):
                     continue
@@ -56,49 +83,58 @@ def to_float(v):
         return None
 
 
+def _steps(records):
+    """Return step values; fall back to index*10 if 'step' not parsed."""
+    if records and "step" in records[0]:
+        return [r["step"] for r in records]
+    return [(i + 1) * 10 for i in range(len(records))]
+
+
 def plot_single(records: list[dict], out_path: Path, log_path: Path | None = None) -> None:
     import matplotlib.pyplot as plt
 
-    epochs = [to_float(r.get("epoch")) for r in records]
+    xs = _steps(records)
     loss = [to_float(r["loss"]) for r in records]
     accuracy = [to_float(r.get("mean_token_accuracy")) for r in records]
     grad_norm = [to_float(r.get("grad_norm")) for r in records]
     lr = [to_float(r.get("learning_rate")) for r in records]
 
     eval_recs = parse_eval(log_path) if log_path else []
-    e_epochs = [to_float(r.get("epoch")) for r in eval_recs]
-    e_loss   = [to_float(r.get("eval_loss")) for r in eval_recs]
-    e_acc    = [to_float(r.get("eval_mean_token_accuracy")) for r in eval_recs]
+    e_xs   = _steps(eval_recs) if eval_recs else []
+    e_loss = [to_float(r.get("eval_loss")) for r in eval_recs]
+    e_acc  = [to_float(r.get("eval_mean_token_accuracy")) for r in eval_recs]
+
+    xlabel = "Step" if (records and "step" in records[0]) else "Epoch"
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
     fig.suptitle(out_path.stem, fontsize=12)
 
-    axes[0, 0].plot(epochs, loss, color="tab:blue", label="train")
-    if e_epochs:
-        axes[0, 0].scatter(e_epochs, e_loss, color="tab:red", marker="D",
+    axes[0, 0].plot(xs, loss, color="tab:blue", label="train")
+    if e_xs:
+        axes[0, 0].scatter(e_xs, e_loss, color="tab:red", marker="D",
                            s=80, zorder=5, label="eval")
         axes[0, 0].legend(fontsize=9)
     axes[0, 0].set_title("Loss")
-    axes[0, 0].set_xlabel("Epoch")
+    axes[0, 0].set_xlabel(xlabel)
     axes[0, 0].grid(True, alpha=0.3)
 
-    axes[0, 1].plot(epochs, accuracy, color="tab:green", label="train")
-    if e_epochs:
-        axes[0, 1].scatter(e_epochs, e_acc, color="tab:red", marker="D",
+    axes[0, 1].plot(xs, accuracy, color="tab:green", label="train")
+    if e_xs:
+        axes[0, 1].scatter(e_xs, e_acc, color="tab:red", marker="D",
                            s=80, zorder=5, label="eval")
         axes[0, 1].legend(fontsize=9)
     axes[0, 1].set_title("Mean Token Accuracy")
-    axes[0, 1].set_xlabel("Epoch")
+    axes[0, 1].set_xlabel(xlabel)
     axes[0, 1].grid(True, alpha=0.3)
 
-    axes[1, 0].plot(epochs, grad_norm, color="tab:orange")
+    axes[1, 0].plot(xs, grad_norm, color="tab:orange")
     axes[1, 0].set_title("Grad Norm")
-    axes[1, 0].set_xlabel("Epoch")
+    axes[1, 0].set_xlabel(xlabel)
     axes[1, 0].grid(True, alpha=0.3)
 
-    axes[1, 1].plot(epochs, lr, color="tab:purple")
+    axes[1, 1].plot(xs, lr, color="tab:purple")
     axes[1, 1].set_title("Learning Rate")
-    axes[1, 1].set_xlabel("Epoch")
+    axes[1, 1].set_xlabel(xlabel)
     axes[1, 1].grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -107,82 +143,107 @@ def plot_single(records: list[dict], out_path: Path, log_path: Path | None = Non
     print(f"Saved plot to {out_path}")
 
 
-def plot_compare(runs: list[tuple[str, Path]], out_path: Path) -> None:
-    """Overlay multiple training runs on shared subplots (by epoch on x-axis).
+def plot_compare(runs: list[tuple[str, Path]], out_path: Path,
+                 split: int = 0,
+                 max_tokens: list[int] | None = None) -> None:
+    """Overlay multiple training runs on shared subplots (step on x-axis).
 
-    Separate subplots for loss (scales differ 10x across runs), shared subplots
-    for accuracy and grad_norm. Eval checkpoints shown as scatter markers.
+    When split > 0, the first `split` runs share the LEFT y-axis (e.g. v0.9
+    with a much larger loss range) and the remaining runs share the RIGHT
+    y-axis — both drawn on the same loss panel so the warmstart lineage is
+    visually clear.
+
+    max_tokens: optional list of max_seq_length per run, added to legend labels.
     """
     import matplotlib.pyplot as plt
 
     COLORS = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple"]
-    EVAL_MARKERS = ["o", "s", "D", "^", "v"]
+    LEFT_STYLE  = {"linestyle": "--", "linewidth": 1.8, "alpha": 0.85}
+    RIGHT_STYLE = {"linestyle": "-",  "linewidth": 1.8}
 
     all_data = []
-    for label, path in runs:
+    for i, (label, path) in enumerate(runs):
+        tok = max_tokens[i] if (max_tokens and i < len(max_tokens)) else None
+        full_label = f"{label} (seq={tok})" if tok else label
         train_recs = parse_log(path)
-        eval_recs = parse_eval(path)
-        all_data.append((label, train_recs, eval_recs))
+        all_data.append((full_label, train_recs))
 
-    # --- Layout: 3 rows (loss, accuracy, grad_norm), 1 col each ---------------
-    # Loss gets its own subplot per run because scales differ by 10-100x.
-    # Accuracy and grad_norm share a subplot across runs.
-    n_runs = len(all_data)
-    fig = plt.figure(figsize=(14, 10))
-    fig.suptitle("Training Comparison — v0.1 / v0.2 / v0.3", fontsize=13, fontweight="bold")
+    dual = split > 0
+    left_data  = all_data[:split] if dual else []
+    right_data = all_data[split:] if dual else all_data
 
-    # Row 1: one loss subplot per run
-    loss_axes = [fig.add_subplot(3, n_runs, i + 1) for i in range(n_runs)]
-    # Row 2: shared accuracy subplot (span all columns)
-    ax_acc = fig.add_subplot(3, 1, 2)
-    # Row 3: shared grad_norm subplot
-    ax_gn = fig.add_subplot(3, 1, 3)
+    # Layout: loss (top, full width) + grad_norm + LR (bottom, side by side)
+    fig = plt.figure(figsize=(14, 9))
+    fig.suptitle("Warmstart Training Chain — v0.9 → v0.12 → v0.14",
+                 fontsize=13, fontweight="bold")
 
-    for idx, (label, train_recs, eval_recs) in enumerate(all_data):
+    ax_loss = fig.add_subplot(2, 1, 1)
+    ax_gn   = fig.add_subplot(2, 2, 3)
+    ax_lr   = fig.add_subplot(2, 2, 4)
+
+    ax_right = ax_loss.twinx() if dual else None
+
+    legend_handles = []
+
+    # ── Left y-axis runs (e.g. v0.9 run13) ──────────────────────────────────
+    for idx, (label, recs) in enumerate(left_data):
+        xs   = _steps(recs)
+        loss = [to_float(r["loss"]) for r in recs]
+        gn   = [to_float(r.get("grad_norm")) for r in recs]
+        lr   = [to_float(r.get("learning_rate")) for r in recs]
         color = COLORS[idx % len(COLORS)]
-        emark = EVAL_MARKERS[idx % len(EVAL_MARKERS)]
 
-        epochs = [to_float(r.get("epoch")) for r in train_recs]
-        loss   = [to_float(r["loss"]) for r in train_recs]
-        acc    = [to_float(r.get("mean_token_accuracy")) for r in train_recs]
-        gn     = [to_float(r.get("grad_norm")) for r in train_recs]
+        line, = ax_loss.plot(xs, loss, color=color, label=label, **LEFT_STYLE)
+        legend_handles.append(line)
+        ax_gn.plot(xs, gn, color=color, label=label, **LEFT_STYLE)
+        ax_lr.plot(xs, lr, color=color, label=label, **LEFT_STYLE)
 
-        e_epochs = [to_float(r.get("epoch")) for r in eval_recs]
-        e_loss   = [to_float(r.get("eval_loss")) for r in eval_recs]
-        e_acc    = [to_float(r.get("eval_mean_token_accuracy")) for r in eval_recs]
+    if dual:
+        ax_loss.set_ylabel("Loss — v0.9", color=COLORS[0], fontsize=10)
+        ax_loss.tick_params(axis="y", labelcolor=COLORS[0])
 
-        # Loss subplot (per run)
-        ax = loss_axes[idx]
-        ax.plot(epochs, loss, color=color, linewidth=1.5, label="train")
-        if e_epochs:
-            ax.scatter(e_epochs, e_loss, color=color, marker=emark,
-                       s=80, zorder=5, label="eval")
-        ax.set_title(label, fontsize=10, fontweight="bold")
-        ax.set_xlabel("Epoch")
-        ax.set_ylabel("Loss" if idx == 0 else "")
-        ax.legend(fontsize=8)
-        ax.grid(True, alpha=0.3)
+    # ── Right y-axis runs (v0.12 / v0.14) ────────────────────────────────────
+    ax_r = ax_right if dual else ax_loss
+    offset = split if dual else 0
 
-        # Accuracy (shared)
-        ax_acc.plot(epochs, acc, color=color, linewidth=1.5, label=f"{label} train")
-        if e_epochs:
-            ax_acc.scatter(e_epochs, e_acc, color=color, marker=emark,
-                           s=80, zorder=5, label=f"{label} eval")
+    for idx, (label, recs) in enumerate(right_data):
+        xs   = _steps(recs)
+        loss = [to_float(r["loss"]) for r in recs]
+        gn   = [to_float(r.get("grad_norm")) for r in recs]
+        lr   = [to_float(r.get("learning_rate")) for r in recs]
+        color = COLORS[(offset + idx) % len(COLORS)]
 
-        # Grad norm (shared)
-        ax_gn.plot(epochs, gn, color=color, linewidth=1.5, label=label)
+        line, = ax_r.plot(xs, loss, color=color, label=label, **RIGHT_STYLE)
+        legend_handles.append(line)
+        ax_gn.plot(xs, gn, color=color, label=label, **RIGHT_STYLE)
+        ax_lr.plot(xs, lr, color=color, label=label, **RIGHT_STYLE)
 
-    ax_acc.set_title("Mean Token Accuracy (all runs)", fontsize=10)
-    ax_acc.set_xlabel("Epoch")
-    ax_acc.set_ylabel("Token Accuracy")
-    ax_acc.legend(fontsize=8, ncol=2)
-    ax_acc.grid(True, alpha=0.3)
+    if dual:
+        ax_right.set_ylabel("Loss — v0.12 / v0.14", fontsize=10)
 
-    ax_gn.set_title("Grad Norm (all runs)", fontsize=10)
-    ax_gn.set_xlabel("Epoch")
+    # ── Annotations ──────────────────────────────────────────────────────────
+    ax_loss.set_title("Training Loss (dashed = left axis, solid = right axis)"
+                      if dual else "Training Loss",
+                      fontsize=10)
+    ax_loss.set_xlabel("Training Step")
+    ax_loss.grid(True, alpha=0.3)
+
+    # Combined legend from both axes
+    labels = [h.get_label() for h in legend_handles]
+    ax_loss.legend(legend_handles, labels, fontsize=8, loc="upper right",
+                   framealpha=0.85)
+
+    ax_gn.set_title("Grad Norm", fontsize=10)
+    ax_gn.set_xlabel("Training Step")
     ax_gn.set_ylabel("Grad Norm")
-    ax_gn.legend(fontsize=8)
+    ax_gn.legend(fontsize=7)
     ax_gn.grid(True, alpha=0.3)
+
+    ax_lr.set_title("Learning Rate", fontsize=10)
+    ax_lr.set_xlabel("Training Step")
+    ax_lr.set_ylabel("LR")
+    ax_lr.legend(fontsize=7)
+    ax_lr.grid(True, alpha=0.3)
 
     plt.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -204,6 +265,20 @@ def main():
         metavar="LABEL:PATH",
         help="Compare multiple runs: 'label:path/to/log' pairs.",
     )
+    ap.add_argument(
+        "--split",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Put first N runs on left y-axis, rest on right (dual-axis mode).",
+    )
+    ap.add_argument(
+        "--max-tokens",
+        nargs="+",
+        type=int,
+        metavar="N",
+        help="Max sequence length per run, in same order as --compare entries.",
+    )
     ap.add_argument("--out", help="Output PNG path.")
     args = ap.parse_args()
 
@@ -215,8 +290,8 @@ def main():
                 sys.exit(1)
             label, path_str = spec.split(":", 1)
             runs.append((label, Path(path_str)))
-        out_path = Path(args.out) if args.out else Path("docs/images/training_comparison_v03.png")
-        plot_compare(runs, out_path)
+        out_path = Path(args.out) if args.out else Path("docs/images/training_warmstart_chain.png")
+        plot_compare(runs, out_path, split=args.split, max_tokens=args.max_tokens)
         return
 
     # Single-log mode

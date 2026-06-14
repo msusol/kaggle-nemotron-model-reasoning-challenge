@@ -6,7 +6,9 @@ Full pipeline for training a Nemotron-3-Nano-30B LoRA adapter on a DGX Spark GB1
 
 ## Final Result
 
-**Best public score: 0.67** — achieved at run17 steps 100, 300, and 500 (all 16 categories, v0.14 data, warmstart from run15-step200). Steps 200 and 400 scored 0.66. The alternating pattern and ceiling at 0.67 across all three checkpoints indicates the binding constraint is the data distribution, not training duration or LR schedule. A score of +0.03 over all v0.12 runs (0.64), driven primarily by adding the 3 missing categories and per-expert MoE LoRA in PEFT-compatible format.
+**Public leaderboard rank: 2,789 / 4,291 — top 65% — score 0.67** (competition best: 0.90).
+
+Achieved at run17 steps 100, 300, and 500 (all 16 categories, v0.14 data, warmstart from run15-step200). Steps 200 and 400 scored 0.66. The alternating pattern and ceiling at 0.67 across all three checkpoints indicates the binding constraint is the data distribution, not training duration or LR schedule. A score of +0.03 over all v0.12 runs (0.64), driven primarily by adding the 3 missing categories and per-expert MoE LoRA in PEFT-compatible format. Gap to top (0.90) is primarily GRPO/RL fine-tuning on top of SFT.
 
 ## Methodology
 

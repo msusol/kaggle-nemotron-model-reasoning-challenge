@@ -63,8 +63,6 @@ Unsloth's fused kernels.
 **Key finding**: model overfit on 4 epochs of v0.9 data (seq=2048). Cured by v0.12's broader
 augmented distribution.
 
-![warmstart training chain](docs/images/training_warmstart_chain.png)
-
 ### v0.12 run14 — augmented data, warmstart from run13 (complete)
 
 300 steps (stopped early) · seq=4096 · lr=1e-4 · warmstart: run13 step-1000 · **0.64 ★ new best**
@@ -114,6 +112,10 @@ generators produce ≤ 500-token CoT traces in Format 4.
 
 See [`docs/plans/v0.14-capped-data-plan.md`](docs/plans/v0.14-capped-data-plan.md) for the
 full dataset build pipeline, drop analysis, and run17 parameters.
+
+*Plot updated at each 100-step checkpoint through run17 completion (step 500).*
+
+![warmstart training chain — v0.9 → v0.12 → v0.14](docs/images/training_warmstart_chain.png)
 
 ## Repository layout
 

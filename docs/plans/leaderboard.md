@@ -2,6 +2,11 @@
 
 Tracks every training run — config, training metrics, and validation results — so runs can be compared across phases.
 
+## Final Competition Result
+
+**Public leaderboard rank: 2,789 / 4,291** — top 65% — score **0.67** (best: 0.90).  
+Best submission: v0.14-run17 (steps 100, 300, and 500 all scored 0.67). Score ceiling hit at 0.67 across all checkpoints — binding constraint is data distribution, not training duration. Gap to top is primarily GRPO/RL on top of SFT (v0.10-grpo was planned but not completed).
+
 ## Columns
 
 | Column | Description |

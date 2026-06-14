@@ -92,9 +92,9 @@ With 2 days to deadline, 19 hours on a dataset missing 3 test categories was not
 See [`docs/plans/v0.13-balanced-data-plan.md`](docs/plans/v0.13-balanced-data-plan.md) for the
 full dataset build pipeline and risk analysis.
 
-### v0.14 run17 — all 16 categories, warmstart from run15-step200 (active)
+### v0.14 run17 — all 16 categories, warmstart from run15-step200 (complete)
 
-500 steps · seq=4096 · lr=1e-4 · warmstart: run15 step-200
+500 steps · seq=4096 · lr=1e-4 linear decay · warmstart: run15 step-200 · **best score: 0.67**
 
 **v0.14 dataset** (12,800 examples, all 16 categories): adds short synthetic traces for the 3
 categories absent from v0.13. All huikang traces for these cats exceed 4,096 tokens; synthetic
@@ -113,7 +113,18 @@ generators produce ≤ 500-token CoT traces in Format 4.
 See [`docs/plans/v0.14-capped-data-plan.md`](docs/plans/v0.14-capped-data-plan.md) for the
 full dataset build pipeline, drop analysis, and run17 parameters.
 
-*Plot updated at each 100-step checkpoint through run17 completion (step 500).*
+Checkpoint scores (all 16 categories, warmstart from run15-step200):
+
+| Step | Train Loss | LR @ step | Kaggle Score |
+|---|---|---|---|
+| 100 | 0.2374 | 8.9e-05 | **0.67 ★** |
+| 200 | 0.2630 | 6.7e-05 | 0.66 |
+| 300 | 0.2465 | 4.5e-05 | **0.67 ★** |
+| 400 | 0.2400 | 2.2e-05 | 0.66 |
+| 500 | 0.2679 | ~0 | *pending* |
+
+**Finding**: score peaks at step 100 and 300 (alternating 0.67 / 0.66), with no further improvement
+from lower LR. The model reaches its best generalisation early in the linear decay schedule.
 
 ![warmstart training chain — v0.9 → v0.12 → v0.14](docs/images/training_warmstart_chain.png)
 
@@ -173,7 +184,7 @@ full dataset build pipeline, drop analysis, and run17 parameters.
 
 ## Commands
 
-### Train (run17 — active)
+### Train (run17 — complete; template for future runs)
 
 ```zsh
 # Always in tmux — never run directly
@@ -188,21 +199,30 @@ Monitor: `tail -f output/train_v14_run17.log`
 
 ### Package and submit
 
+Wait for `[moe-lora] Saved ... expert_lora_weights.pt` in the log before packaging
+(expert weights finish ~45s after the tqdm loss line).
+
 ```zsh
-# Package from rolling checkpoint (run on HOST, not inside Docker)
-bash scripts/package_submission.sh \
-  output/adapter_v14_run17_ckpt \
-  /tmp/sub_v14_step<N>
+# While trainer container is running
+docker exec <container_name> bash scripts/package_submission.sh \
+  output/adapter_<RUN>/checkpoint-N \
+  output/sub_<RUN>_stepN
+
+# After training completes (container stopped)
+WORKSPACE=$(pwd)
+docker run --rm \
+  --privileged -e NVIDIA_VISIBLE_DEVICES=all \
+  -v "${WORKSPACE}":/workspace -w /workspace \
+  nemotron-gb10:latest \
+  bash scripts/package_submission.sh \
+    output/adapter_<RUN>/checkpoint-N \
+    output/sub_<RUN>_stepN
 
 # Submit
-kaggle competitions submit \
-  -c nvidia-nemotron-model-reasoning-challenge \
-  -f /tmp/sub_v14_step<N>/submission.zip \
-  -m "v0.14 run17 step-<N>: all 16 cats, warmstart run15-step200"
+kaggle competitions submit nvidia-nemotron-model-reasoning-challenge \
+  -f output/sub_<RUN>_stepN/submission.zip \
+  -m "<version> <run> step<N> <key metrics>"
 ```
-
-Package from the **rolling copy** (`output/adapter_v14_run17_ckpt`) immediately after each
-checkpoint notification — it's overwritten every 100 steps.
 
 ### Regenerate v0.12 training data
 
@@ -236,4 +256,6 @@ See [`docs/plans/leaderboard.md`](docs/plans/leaderboard.md) for the full run hi
 | v0.12-run15-step100 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | 0.2738 | 0.64 | Warmstart run14, lr=2e-4 — plateau from step 50, no improvement vs run14 |
 | v0.12-run15-step200 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | 0.2823 | 0.64 | Run15 final — stopped at step 200; same score as run14 |
 | v0.13-run16 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | — | skipped | Stopped step 17 — v0.13 missing 3 of 16 categories; pivoted to v0.14 |
-| v0.14-run17 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | — | **active** | Warmstart run15-step200, v0.14 all 16 cats, 12,800 rows; 500 steps planned |
+| v0.14-run17-step100 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | 0.2374 | **0.67 ★** | Warmstart run15-step200, v0.14 all 16 cats — new overall best |
+| v0.14-run17-step300 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | 0.2465 | **0.67 ★** | Tied best — mid-decay checkpoint |
+| v0.14-run17-step500 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | 0.2679 | *pending* | Final checkpoint — run17 complete |

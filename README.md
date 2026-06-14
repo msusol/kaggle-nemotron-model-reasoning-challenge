@@ -121,10 +121,11 @@ Checkpoint scores (all 16 categories, warmstart from run15-step200):
 | 200 | 0.2630 | 6.7e-05 | 0.66 |
 | 300 | 0.2465 | 4.5e-05 | **0.67 ★** |
 | 400 | 0.2400 | 2.2e-05 | 0.66 |
-| 500 | 0.2679 | ~0 | *pending* |
+| 500 | 0.2679 | ~0 | **0.67 ★** |
 
-**Finding**: score peaks at step 100 and 300 (alternating 0.67 / 0.66), with no further improvement
-from lower LR. The model reaches its best generalisation early in the linear decay schedule.
+**Finding**: steps 100, 300, and 500 all score 0.67; steps 200 and 400 score 0.66. The alternating
+pattern suggests the model oscillates around a performance ceiling — the v0.14 data distribution
+and warmstart combination is the binding constraint, not training duration.
 
 ![warmstart training chain — v0.9 → v0.12 → v0.14](docs/images/training_warmstart_chain.png)
 
@@ -258,4 +259,4 @@ See [`docs/plans/leaderboard.md`](docs/plans/leaderboard.md) for the full run hi
 | v0.13-run16 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | — | skipped | Stopped step 17 — v0.13 missing 3 of 16 categories; pivoted to v0.14 |
 | v0.14-run17-step100 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | 0.2374 | **0.67 ★** | Warmstart run15-step200, v0.14 all 16 cats — new overall best |
 | v0.14-run17-step300 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | 0.2465 | **0.67 ★** | Tied best — mid-decay checkpoint |
-| v0.14-run17-step500 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | 0.2679 | *pending* | Final checkpoint — run17 complete |
+| v0.14-run17-step500 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | 0.2679 | **0.67 ★** | Final checkpoint — run17 complete; tied overall best |

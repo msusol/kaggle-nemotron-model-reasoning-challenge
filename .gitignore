@@ -23,6 +23,11 @@ data/v0.12_train.jsonl
 data/v0.13_merged.jsonl
 data/v0.13_train.jsonl
 data/equation_symbolic_synthetic.jsonl
+data/spelling_synthetic.jsonl
+data/eq_num_deduce_synthetic.jsonl
+data/eq_num_guess_synthetic.jsonl
+data/v0.14_merged.jsonl
+data/v0.14_train.jsonl
 data/v0.9_grpo_train.jsonl
 data/v0.9_grpo_valid.jsonl
 unsloth_compiled_cache/

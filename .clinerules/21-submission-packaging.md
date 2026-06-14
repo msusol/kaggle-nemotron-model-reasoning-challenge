@@ -36,4 +36,18 @@ kaggle competitions submit nvidia-nemotron-model-reasoning-challenge \
   -m "<version> <run_name> step<N> <key metrics>"
 ```
 
-Package from the **rolling checkpoint** (`output/adapter_<RUN_NAME>_ckpt/`) immediately after each 100-step notification — it is overwritten at the next checkpoint. Named snapshots (e.g., `output/adapter_v12_run15_step200/`) are permanent.
+Package from **named checkpoints** (`output/adapter_<RUN_NAME>/checkpoint-N/`) — they are permanent and never overwritten. Always wait for the `[moe-lora] Saved ... expert_lora_weights.pt` log line before packaging; the expert weights (1.6 GB) finish ~45s after the tqdm loss line.
+
+**If the training container has stopped** (training complete), use `docker run --rm` with the same image:
+
+```zsh
+WORKSPACE=/home/msusol/LosusAI/Projects/Kaggle/kaggle-nemotron-model-reasoning-challenge
+docker run --rm \
+  --privileged -e NVIDIA_VISIBLE_DEVICES=all \
+  -v "${WORKSPACE}":/workspace \
+  -w /workspace \
+  nemotron-gb10:latest \
+  bash scripts/package_submission.sh \
+    output/adapter_<RUN_NAME>/checkpoint-N \
+    output/sub_<RUN_NAME>_stepN
+```

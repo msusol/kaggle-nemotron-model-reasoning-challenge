@@ -64,7 +64,7 @@ Key changes for v0.3:
 ## ⚠️  COMPETITION DEADLINE
 - **June 8, 2026** — Entry deadline + Team merger deadline ✅ rules accepted
 - **June 15, 2026 at 11:59 PM UTC** — Final submission deadline
-- Today: June 3, 2026 — **12 days remaining**
+- Today: June 13, 2026 — **2 days remaining**
 
 All items marked DEADLINE BLOCKER must complete before June 15.
 
@@ -329,13 +329,21 @@ Replaces v0.10 on DGX Spark — vLLM sidecar is infeasible (OOM); uses Megatron 
 5. Train on DGX Spark: `train_v9_sft.py --warmstart-adapter ... --max-seq-length 8192 --max-steps 600`
 6. Package and submit; update leaderboard
 
-### v0.13-balanced-data-plan.md
-- [x] Write `scripts/generate_equation_symbolic.py` — synthetic equation_symbolic puzzles (Alice's Wonderland rule-inference format, 4 rule types)
-- [x] Write `scripts/balance_dataset.py` — cap overrepresented + repeat underrepresented categories
-- [x] Generate `data/v0.13_train.jsonl` — 16,181 examples; equation_symbolic 1→501, top cats capped at 1500
-- [ ] Wait for run15 best checkpoint; record Kaggle score in leaderboard
-- [ ] Launch run16: warmstart best run15, `TRAIN_FILE=data/v0.13_train.jsonl`, LR=1e-4, max_steps=600
-- [ ] Submit run16 checkpoint(s); update leaderboard
+### v0.13-balanced-data-plan.md ✓
+- [x] Write `scripts/generate_equation_symbolic.py`
+- [x] Write `scripts/balance_dataset.py` (with `--max-tokens` flag)
+- [x] Generate `data/v0.13_train.jsonl` — 11,300 examples, 13/16 categories
+- [x] run15 step100 and step200 both scored **0.64** (same as run14 — lr=2e-4 plateau)
+- [x] run16 stopped at step 17 — switched to v0.14 to cover all 16 categories
+
+### v0.14-capped-data-plan.md (active)
+- [x] Write generators for 3 missing categories: `generate_spelling.py`, `generate_equation_numeric_deduce.py`, `generate_equation_numeric_guess.py`
+- [x] Fix `generate_equation_symbolic.py` — remove `<think>` opener (Format 4 compliance)
+- [x] Write `scripts/generate_v14_data.sh` — end-to-end build script
+- [x] Build `data/v0.14_train.jsonl` — 12,800 examples, all 16 categories, all ≤4096 tok
+- [x] Launch run17: warmstart `adapter_v12_run15_step200`, v0.14 data, lr=1e-4, max_steps=500
+- [x] Publish `gdataranger/nemotron-v014-training-data` to Kaggle
+- [ ] Submit run17 checkpoint(s) at steps 100, 200, 300, 400, 500; update leaderboard
 
 ## Infrastructure (complete)
 - [x] `Dockerfile.gb10` (26.04) — current primary image for all training runs

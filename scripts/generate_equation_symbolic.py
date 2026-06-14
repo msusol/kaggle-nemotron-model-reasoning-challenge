@@ -141,7 +141,6 @@ RULE_GENERATORS = [rule_delete_op, rule_replace_op, rule_keep_op, rule_swap_ops]
 
 def build_cot(examples: list[tuple[str,str]], test_in: str, test_out: str, rule_desc: str) -> str:
     lines = [
-        "<think>",
         "We need to infer a hidden transformation rule from the given examples.",
         "",
     ]

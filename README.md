@@ -212,6 +212,6 @@ See [`docs/plans/leaderboard.md`](docs/plans/leaderboard.md) for the full run hi
 | v0.9-run13-step700 | 2048 | 11,962 (186 base + 11,776 expert) | 878M | 0.1380 | 0.57 | Epoch 3 boundary |
 | v0.9-run13-step1000 | 2048 | 11,962 (186 base + 11,776 expert) | 878M | 0.1220 | 0.49 | Overfit — 4 epochs on v0.9 data |
 | v0.12-run14-step300 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | ~0.285 | **0.64 ★** | New best — warmstart run13, v0.12 augmented data |
-| v0.12-run15-step100 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | 0.2738 | pending | Warmstart run14, lr=2e-4 |
-| v0.12-run15-step200 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | 0.2823 | pending | Run15 final — warmstart for run16 |
+| v0.12-run15-step100 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | 0.2738 | 0.64 | Warmstart run14, lr=2e-4 — plateau from step 50, no improvement vs run14 |
+| v0.12-run15-step200 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | 0.2823 | 0.64 | Run15 final — stopped at step 200; same score as run14 |
 | v0.13-run16 | 4096 | 11,962 (186 base + 11,776 expert) | 878M | — | **active** | Warmstart run15-step200, v0.13 balanced+filtered data (11,300 rows) |

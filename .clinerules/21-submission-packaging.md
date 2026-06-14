@@ -1,20 +1,20 @@
 # Rule 21 — Submission Packaging
 
-## Always use `scripts/package_submission.sh` directly from the host
+## Always run `scripts/package_submission.sh` via `docker exec` into the live training container
 
-To package a checkpoint for submission, run from the project root:
+The script calls `python3` with `torch` and `safetensors` directly — the host Python has neither. Run it inside the live training container:
 
 ```zsh
-bash scripts/package_submission.sh \
+docker exec <container_name> bash scripts/package_submission.sh \
   output/adapter_<RUN_NAME>_ckpt \
   output/sub_<RUN_NAME>_step<N>
 ```
 
-The script internally handles its own Docker exec call — it does **not** need to be wrapped in a separate `docker run` or `docker exec` invocation. Running it from a host shell is the correct and only way.
+The active training container for run17 is `nemotron-trainer-v14`. Check with `docker ps --filter name=nemotron`.
 
-**Why:** `scripts/package_submission.sh` spawns the torch/safetensors work inside the live training container (or a minimal Docker exec) using the `nemotron-gb10:latest` image, which has the required ML packages. The host Python has no `torch`. Do not attempt to call `docker run` or `docker exec` around this script.
+**Why:** The project directory is bind-mounted as `/workspace` inside the training container. Checkpoints written by the trainer are immediately visible at the same relative path inside the container. `docker exec` runs the script in that environment where `torch`/`safetensors` are available, without interrupting training.
 
-**Docker live mount:** The project directory is bind-mounted as `/workspace` inside the training container. Any checkpoint files written by the trainer (e.g., `output/adapter_v14_run17_ckpt/`) are immediately visible on the host and inside any new container launched with the same `-v` mount — no copying required.
+**Never use `docker run`** (a new container) — use `docker exec` into the already-running trainer.
 
 ## Submission workflow
 

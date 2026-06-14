@@ -9,6 +9,14 @@ __pycache__/
 # Large generated data files — regenerate with extraction/conversion scripts
 data/v0.4_train.jsonl
 data/v0.4_valid.jsonl
+data/v0.4_valid_labels.jsonl
+data/v0.5_train.jsonl
+data/v0*_grpo_train.jsonl
+data/v0*_grpo_valid.jsonl
+data/v09-training-data/*.jsonl
+data/v012-training-data/*.jsonl
+data/v013-training-data/*.jsonl
+data/v014-training-data/*.jsonl
 data/nemo_train.jsonl
 data/nemo_valid.jsonl
 data/nemo_dataset/nemo_train.jsonl

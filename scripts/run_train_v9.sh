@@ -4,8 +4,8 @@
 #
 # Usage (always inside a tmux session):
 #   tmux new -s train_v9
-#   RUN_NAME=v9_run12 \
-#   TRAIN_FILE=/workspace/data/v0.9_train.jsonl \
+#   RUN_NAME=v12_spark \
+#   TRAIN_FILE=/workspace/data/v0.12_train.jsonl \
 #   WARMSTART_ADAPTER=/workspace/warmstart \
 #   RESUME_FROM_CHECKPOINT=/workspace/output/adapter_v9_run12/checkpoint-500 \
 #   MIN_SEQ_LENGTH=2048 \
